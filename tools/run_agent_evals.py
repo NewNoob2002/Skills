@@ -228,6 +228,11 @@ def combine(det_ok: bool, jstat: str) -> str:
 
 def rejudge(report: dict, cases: dict, model: str, timeout: int, jobs: int, everything: bool = False) -> int:
     """重新评审；返回重新评审的条数。everything 为 True 时重评全部有 rubric 的记录并保留原结论。"""
+    # 旧报告没有逐条记录评委模型：先用顶层模型补齐，避免部分重评后把旧结论归给新评委
+    prior = report.get("judge_model")
+    for rec in report["records"]:
+        if prior and rec.get("judge") and not rec["judge"].get("model"):
+            rec["judge"]["model"] = prior
     todo = [r for r in report["records"] if r.get("judge") and r["id"] in cases and r.get("run")
             and (everything or r["judge"].get("status") == BLOCKED)]
 

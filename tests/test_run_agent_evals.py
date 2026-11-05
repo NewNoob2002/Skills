@@ -237,6 +237,21 @@ class RejudgeTest(unittest.TestCase):
         self.assertEqual(records[0]["judge"]["model"], "new")
         self.assertEqual(report["judge_model"], "new + old")
 
+    def test_partial_rejudge_keeps_legacy_model_attribution(self):
+        # e725057 之前的报告没有逐条 judge.model：旧结论必须仍归给旧评委
+        cases = {"G": {"id": "G", "prompt": "p", "rubric": ["r"]}}
+        records = [
+            {"agent": "a", "id": "G", "category": "guardrail", "status": "NOT_RUN", "checks": [],
+             "run": {"final": "x"}, "judge": {"status": "BLOCKED", "reason": "x"}},
+            {"agent": "a", "id": "G", "category": "guardrail", "status": "PASS", "checks": [],
+             "run": {"final": "y"}, "judge": {"status": "PASS", "items": []}},
+        ]
+        report = {"records": records, "judge_model": "old"}
+        with mock.patch.object(ra, "judge", return_value={"status": "PASS", "items": [], "model": "new"}):
+            ra.rejudge(report, cases, "new", 5, 2)
+        self.assertEqual(records[1]["judge"]["model"], "old")
+        self.assertEqual(report["judge_model"], "new + old")
+
 
 class MainTest(unittest.TestCase):
     def test_missing_agent_cli_records_every_repeat(self):
