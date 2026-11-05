@@ -1,0 +1,76 @@
+# 验证工程：FreeRTOS + C++17（Cortex-M0+，资源等级 T0）
+# 目标构建只含遥测模块与 bsp（不链接 RTOS），用 cpp_cost 检查 T0 禁止的运行时；
+# RTOS 行为在 host 上用 FreeRTOS POSIX 移植做集成测试；模块逻辑用 CppUTest 测试。
+# 预期结果在运行前写定；首次运行的不一致及处理见 evals/TRIAGE.md。
+project: freertos-cpp
+profile: mcu-rtos
+summary: "C++17 遥测模块（滑动平均 + 纯虚输出接口）：Cortex-M0+ T0 目标构建与 cpp_cost 门禁、CppUTest 单元测试、FreeRTOS POSIX 集成测试。"
+checks:
+  arch_lint:
+    run: "python3 {skill}/scripts/arch_lint.py ."
+    blocked_codes: [2]
+    rules: [ARCH-001, ARCH-002, ARCH-003, ARCH-004, ARCH-005, ARCH-006]
+  format:
+    run: "make -s format STYLE={skill}/assets/cpp/.clang-format"
+    requires: [clang-format, make]
+    rules: [CPP-015]
+  cross_build:
+    run: "make -s cross"
+    requires: [arm-none-eabi-g++, make]
+    rules: [CPP-001, CPP-008, CPP-015]
+  cpp_cost:
+    run: "python3 {skill}/scripts/cpp_cost.py check build/app_m0.elf --tier T0"
+    requires: [arm-none-eabi-nm]
+    needs: [cross_build]
+    rules: [CPP-001, CPP-002, CPP-003, CPP-004, CPP-005, CPP-006, CPP-007, CPP-008, CPP-009, CPP-011]
+  unit:
+    run: "make -s unit CPPUTEST={cpputest}"
+    requires: [g++, make, "{cpputest}/lib/libCppUTest.a"]
+    rules: [TEST-006]
+  rtos_host:
+    run: "make -s rtos FREERTOS={freertos}"
+    requires: [gcc, g++, make, "{freertos}/tasks.c"]
+    timeout: 120
+    rules: [TEST-006]
+variants:
+  good: {}
+  bad-std-function:
+    violates: [CPP-004]
+    note: "DebugSink 内部用 std::function 保存回调：T0 下 cpp_cost 检出堆、throw 辅助与静态析构"
+    expect: {cpp_cost: FAIL}
+  bad-std-vector:
+    violates: [CPP-005]
+    note: "滑动平均缓冲改用 std::vector：host 测试行为不变，目标 ELF 拉入 operator new 与 malloc"
+    expect: {cpp_cost: FAIL}
+  bad-local-static:
+    violates: [CPP-009]
+    note: "bsp 中函数局部静态对象用运行期值初始化：生成 __cxa_guard_acquire"
+    expect: {cpp_cost: FAIL}
+  bad-atomic-rmw:
+    violates: [CPP-008]
+    note: "ARMv6-M 上 std::atomic<uint32_t>::fetch_add：链接失败（__atomic_fetch_add_4 未定义），cpp_cost 因此被阻塞"
+    expect: {cross_build: FAIL, cpp_cost: BLOCKED}
+  bad-public-virtual-dtor:
+    violates: [CPP-011]
+    note: "接口改为公有虚析构：vtable 引用 deleting destructor，拉入 operator delete 与 free"
+    expect: {cpp_cost: FAIL}
+  bad-throw:
+    violates: [CPP-001]
+    note: "noexcept 函数中 throw：目标构建因 -fno-exceptions 报错；host 构建因 -Wterminate + -Werror 报错"
+    expect: {cross_build: FAIL, cpp_cost: BLOCKED, unit: FAIL, rtos_host: FAIL}
+  bad-layering:
+    violates: [ARCH-001]
+    note: "module 包含 bsp 头文件（未调用）：只有分层检查能发现"
+    expect: {arch_lint: FAIL}
+  bad-average-divisor:
+    defect: "MovingAverage 总是除以窗口大小 N，未满窗口时平均值偏小"
+    note: "集成测试只检查满窗口后的平均值，因此 rtos_host 通过；单元测试覆盖未满窗口"
+    expect: {unit: FAIL}
+  bad-consumer-deadlock:
+    defect: "consumer 任务在一个永远没有人写入的队列上等待"
+    note: "只有 RTOS 集成测试能发现：看门狗任务 2000 tick 后以退出码 2 结束"
+    expect: {rtos_host: FAIL}
+  bad-rtti:
+    violates: [CPP-002]
+    note: "构建配置回退，目标编译丢失 -fno-rtti：带虚函数的 DebugSink 生成 typeinfo"
+    expect: {cpp_cost: FAIL}

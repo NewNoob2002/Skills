@@ -10,7 +10,7 @@ ceedling new --local --gitsupport <name>   # --local 把 Unity/CMock/Ceedling �
 ceedling upgrade <project>     # 已 vendor 的项目随 gem 升级
 ```
 
-已有固件仓库：把 `assets/ceedling/project.yml` 复制到仓库根并按目录调整 `:paths:`；不要为此重排生产代码目录。
+已有固件仓库：把 `assets/ceedling/project.yml` 复制到仓库根并按目录调整 `:paths:`；不要为此重排生产代码目录。Ceedling 1.2.2 对 `:paths:` 中不存在的目录报 `Config path ... does not exist` 并停止，复制后先删掉仓库里没有的目录（2026-11-05 用 Ceedling 1.2.2 验证）。
 
 ## 2. 关键命令
 

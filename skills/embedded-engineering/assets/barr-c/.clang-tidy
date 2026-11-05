@@ -13,6 +13,9 @@
 # readability-braces-around-statements     -> 1.3.a braces on every block
 # bugprone-assignment-in-if-condition      -> 8.2/8.6 assignment-vs-comparison
 # hicpp-signed-bitwise                     -> 5.3.b no bitwise ops on signed
+# bugprone-signed-bitwise                  -> same check; LLVM 23 removed the hicpp- name and silently
+#                                             ignores it, so both names are listed (local change, see
+#                                             THIRD_PARTY_NOTICES.md)
 #                                             (alias of bugprone-signed-bitwise after 19)
 # bugprone-reserved-identifier             -> 6.1.c/7.1.c leading underscores
 # readability-identifier-naming            -> 4.1/5.1/6.1/7.1 naming rules
@@ -38,6 +41,7 @@ Checks: >
   readability-braces-around-statements,
   bugprone-assignment-in-if-condition,
   hicpp-signed-bitwise,
+  bugprone-signed-bitwise,
   bugprone-reserved-identifier,
   readability-identifier-naming,
   readability-function-size,

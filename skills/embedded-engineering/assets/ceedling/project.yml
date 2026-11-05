@@ -1,5 +1,6 @@
 # Ceedling 1.x 项目模板（MCU host 单元测试）。
 # 按仓库实际目录调整 :paths:；生产代码目录与 references/architecture/mcu-architecture.md 一致。
+# Ceedling 1.2.2 对不存在的路径报配置错误并停止：删除仓库中没有的目录（如 driver/、tests/support）。
 ---
 :project:
   :build_root: build/ceedling

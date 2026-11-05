@@ -1,0 +1,9 @@
+sample:
+  name: frame parser application
+tests:
+  app.frame.build:
+    build_only: true
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64

@@ -1,6 +1,7 @@
 """embedded-engineering 脚本回归测试（仅标准库）：python3 -m unittest discover -s tests -v"""
 
 import json
+import shutil
 import re
 import subprocess
 import sys
@@ -310,6 +311,39 @@ class WorkflowPagesTest(unittest.TestCase):
         for page in self.pages():
             with self.subTest(page=page.name):
                 self.assertIn(f"]({page.name})", catalog)
+
+
+class ClangTidyConfigTest(unittest.TestCase):
+    """clang-tidy 会静默忽略未知检查名：配置中的每个检查都必须被已安装的 clang-tidy 识别。
+
+    回归：LLVM 23 移除了 hicpp-signed-bitwise，BARR-C 5.3.b（C-005）曾因此在不报错的情况下失效。
+    旧名称只有在其新名称同时列出时才允许保留（兼容旧版 clang-tidy）。
+    """
+
+    COMPAT_ALIASES = {"hicpp-signed-bitwise": "bugprone-signed-bitwise"}
+
+    def configured(self, path):
+        text = path.read_text(encoding="utf-8")
+        block = text.split("Checks:", 1)[1].split("WarningsAsErrors", 1)[0].split("CheckOptions", 1)[0]
+        names = re.findall(r"(?<![\w*-])(-?[a-z][a-z0-9]+(?:-[a-z0-9.]+)+)", block)
+        return [n for n in names if not n.startswith("-") and "*" not in n]
+
+    def test_all_configured_checks_exist(self):
+        tidy = shutil.which("clang-tidy")
+        if tidy is None:
+            self.skipTest("clang-tidy not installed")
+        proc = subprocess.run([tidy, "--list-checks", "--checks=*"], capture_output=True, text=True, check=False)
+        known = {line.strip() for line in proc.stdout.splitlines()}
+        for cfg in (SKILL / "assets" / "barr-c" / ".clang-tidy", SKILL / "assets" / "cpp" / ".clang-tidy"):
+            names = self.configured(cfg)
+            self.assertTrue(names, cfg)
+            for name in names:
+                with self.subTest(config=cfg.parent.name, check=name):
+                    if name in known:
+                        continue
+                    alias = self.COMPAT_ALIASES.get(name)
+                    self.assertTrue(alias and alias in names and alias in known,
+                                    f"{name} is unknown to {tidy} and has no listed replacement")
 
 if __name__ == "__main__":
     unittest.main()

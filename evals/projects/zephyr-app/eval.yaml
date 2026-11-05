@@ -1,0 +1,43 @@
+# 验证工程：Zephyr 应用（native_sim/native/64，无需 Zephyr SDK）
+# checkpatch 与 clang-format 使用 Zephyr 树内的官方配置；ztest 由 Twister 构建并运行。
+# 预期结果在运行前写定；首次运行的不一致及处理见 evals/TRIAGE.md。
+project: zephyr-app
+profile: zephyr
+summary: "协议帧解析库 + 应用（device_is_ready、LOG_*）+ ztest 测试套件；Twister 在 native_sim/native/64 上构建应用并运行测试。"
+checks:
+  checkpatch:
+    run: "D=$PWD && cd {zephyr_base} && ./scripts/checkpatch.pl --no-tree --quiet -f $(find $D -name '*.[ch]' -not -path '*/build/*' | sort)"
+    requires: [perl, "{zephyr_base}/scripts/checkpatch.pl"]
+    rules: [ZEP-001, ZEP-002]
+  zephyr_format:
+    run: "clang-format --style=file:{zephyr_base}/.clang-format --dry-run --Werror $(find src include tests -name '*.[ch]' | sort)"
+    requires: [clang-format, "{zephyr_base}/.clang-format"]
+    rules: [ZEP-001]
+  twister:
+    run: "{zephyr_venv}/bin/python {zephyr_base}/scripts/twister -T . -p native_sim/native/64 -O build/twister --inline-logs -j 4"
+    requires: [cmake, ninja, dtc, "{zephyr_venv}/bin/python", "{zephyr_base}/scripts/twister"]
+    env:
+      ZEPHYR_BASE: "{zephyr_base}"
+      ZEPHYR_TOOLCHAIN_VARIANT: host
+    timeout: 1200
+    rules: [ZEP-009, PROTO-001]
+variants:
+  good: {}
+  bad-cpp-comment:
+    violates: [ZEP-002]
+    expect: {checkpatch: FAIL}
+  bad-no-braces:
+    violates: [ZEP-001]
+    note: "单语句 if 不加花括号：Zephyr 的 .clang-format 启用 InsertBraces，dry-run 报差异。首次运行前预期 checkpatch 为 PASS（按 Linux 版 checkpatch 推断）；实测 Zephyr 修改过 checkpatch，报 'braces {} are required around if/while/for/else'，故预期更正为 FAIL（见 evals/TRIAGE.md）"
+    expect: {checkpatch: FAIL, zephyr_format: FAIL}
+  bad-no-length-check:
+    violates: [PROTO-001]
+    note: "删去长度字段上限检查：超长帧的用例期望 -EMSGSIZE，实际得到 -EBADMSG"
+    expect: {twister: FAIL}
+  bad-checksum-ignored:
+    defect: "解析器不比较校验和"
+    expect: {twister: FAIL}
+  bad-no-device-ready:
+    violates: [ZEP-004]
+    note: "使用设备前不检查 device_is_ready()"
+    known_gap: "ZEP-004 是 review 规则：checkpatch、clang-format 与 native_sim 上的构建和测试都不能发现缺少就绪检查（console 设备在 native_sim 上总是就绪）"

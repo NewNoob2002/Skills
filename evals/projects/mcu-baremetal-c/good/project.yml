@@ -1,0 +1,84 @@
+# Ceedling 1.x 项目模板（MCU host 单元测试）。
+# 按仓库实际目录调整 :paths:；生产代码目录与 references/architecture/mcu-architecture.md 一致。
+# Ceedling 1.2.2 对不存在的路径报配置错误并停止：删除仓库中没有的目录（如 driver/、tests/support）。
+---
+:project:
+  :build_root: build/ceedling
+  :test_file_prefix: test_
+  :use_mocks: TRUE
+  # 头文件含 #ifdef 或宏生成的声明时改为 :mocks 或 :all（需要 gcc/cpp 在 PATH）。
+  :use_test_preprocessor: :none
+  :compile_threads: :auto
+  :test_threads: :auto
+  :use_backtrace: :simple
+  :release_build: FALSE
+
+:paths:
+  :test:
+    - +:tests/**
+  :source:
+    - app/**
+    - module/**
+    - bsp/**
+  :include:
+    - interface/**
+    - module/**
+
+:defines:
+  :test:
+    - TEST
+    # host 构建不应包含厂商头；需要区分目标时由此宏控制。
+    - HOST_UNIT_TEST
+
+:flags:
+  :test:
+    # 简单列表形式：作用于所有测试的所有文件。
+    # 与 assets/barr-c/COMPILER_FLAGS.md 一致的告警门禁（测试代码同样编译）。
+    :compile:
+      - -std=c99
+      - -Wall
+      - -Wextra
+      - -Werror=implicit-function-declaration
+      - -Werror=parentheses
+      - -Wfloat-equal
+      - -Wsign-compare
+      - -Wshadow
+      - -Wundef
+      - -Wvla
+
+:cmock:
+  :mock_prefix: mock_
+  :when_no_prototypes: :warn
+  :enforce_strict_ordering: TRUE
+  :plugins:
+    - :ignore
+    - :ignore_arg
+    - :expect_any_args
+    - :array
+    - :callback
+    - :return_thru_ptr
+  :treat_as:
+    uint8_t: HEX8
+    uint16_t: HEX16
+    uint32_t: UINT32
+    int8_t: INT8
+    bool: UINT8
+
+:plugins:
+  :enabled:
+    - report_tests_pretty_stdout
+    - gcov
+
+:gcov:
+  :summaries: TRUE
+  :utilities:
+    - gcovr
+  :reports:
+    - HtmlDetailed
+    - Cobertura
+  :gcovr:
+    :html_medium_threshold: 60
+    :html_high_threshold: 85
+    # 由项目设定门槛后取消注释；低于门槛时 gcovr 以状态码 2 退出。
+    # :fail_under_line: 80
+...

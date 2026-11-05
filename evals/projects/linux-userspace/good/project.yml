@@ -1,0 +1,49 @@
+# 由 assets/ceedling/project.yml 复制后按本工程调整：目录为 src/ 与 tests/，C11 + POSIX，
+# 测试在 ASan/UBSan 下运行（LNXU-007），越界或未定义行为直接使测试失败。
+---
+:project:
+  :build_root: build/ceedling
+  :test_file_prefix: test_
+  :use_mocks: TRUE
+  :use_test_preprocessor: :none
+  :compile_threads: :auto
+  :test_threads: :auto
+  :use_backtrace: :simple
+  :release_build: FALSE
+
+:paths:
+  :test:
+    - +:tests/**
+  :source:
+    - src/**
+  :include:
+    - src/**
+
+:defines:
+  :test:
+    - TEST
+    - _POSIX_C_SOURCE=200809L
+
+:flags:
+  :test:
+    :compile:
+      - -std=c11
+      - -Wall
+      - -Wextra
+      - -Werror=implicit-function-declaration
+      - -fsanitize=address,undefined
+      - -fno-sanitize-recover=all
+      - -fno-omit-frame-pointer
+    :link:
+      - -fsanitize=address,undefined
+
+:cmock:
+  :mock_prefix: mock_
+  :when_no_prototypes: :warn
+  :plugins:
+    - :ignore
+    - :ignore_arg
+    - :expect_any_args
+    - :array
+    - :callback
+    - :return_thru_ptr

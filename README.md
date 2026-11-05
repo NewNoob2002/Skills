@@ -75,8 +75,14 @@ tools/validate_skill.json       # 每个技能的自检配置（SKILL.md 行数�
 tests/test_scripts.py           # arch_lint、detect_profile 回归测试
 tests/test_validate_skill.py    # validate_skill 变异测试（逐项注入缺陷，含 rules/profiles）与 YAML 解析测试
 tests/test_cpp.py               # cpp_cost、C++ 模板矩阵、CppUTest 模板
+tests/test_run_evals.py         # run_evals 判定语义（MATCH/MISMATCH/NOT_RUN/BLOCKED）与定义校验
 tests/cpp/                      # C++ 模板编译与负向编译检查
 install.sh                      # 安装器
+tools/run_evals.py              # 运行验证工程并对照预期：--report 生成 evals/RESULTS.md
+tools/install_eval_tools.sh     # 验证工程所需的用户级工具（west、Zephyr、FreeRTOS、ETL、CppUTest、Renode）
+evals/projects/<name>/          # 四类验证工程：good/ 已知良好样例、variants/ 故意引入问题的变体、eval.yaml 预期
+evals/RESULTS.md                # run_evals 生成的结果（不要手改）
+evals/TRIAGE.md                 # 首次运行时预期与结果不一致的分诊记录
 ```
 
 ## 安装
@@ -110,7 +116,8 @@ install.sh                      # 安装器
 | 项 | 结果 |
 | --- | --- |
 | `python3 tools/validate_skill.py`（技能 13 项 + README 3 项检查） | PASS |
-| `python3 -m unittest discover -s tests -v`（182 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试；见下行环境变量；未设置时 C++ 工具链相关用例跳过） | PASS |
+| `python3 -m unittest discover -s tests -v`（202 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试、clang-tidy 检查名有效性、run_evals 语义；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 后无跳过） | PASS |
+| `python3 tools/run_evals.py --strict`：4 个验证工程、32 个变体（4 个良好样例 + 28 个故意引入问题的变体），结果见 `evals/RESULTS.md` | PASS：32 MATCH，0 MISMATCH，0 NOT_RUN；4 个已知漏报（review 规则）均已登记 |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |
 | C++ 模板 clang-format（`assets/cpp/.clang-format`）与 clang-tidy（`assets/cpp/.clang-tidy`，含头文件） | PASS |
@@ -120,15 +127,18 @@ install.sh                      # 安装器
 | `scripts/bench/run.sh` 在 Cortex-M4F 与 M0+ 上复现开销表 | PASS |
 | `linker_discard.ld`（INSERT 形式）链接后移除 `.fini/.fini_array` | PASS |
 | 模板 `clang-format --dry-run --Werror`（BARR-C 配置，clang-format 23） | PASS |
-| 模板 `clang-tidy`（BARR-C 配置，含头文件） | PASS |
+| 模板 `clang-tidy`（BARR-C 配置，含头文件） | PASS。注意：2026-11-05 的验证工程发现 `hicpp-signed-bitwise` 在 clang-tidy 23 上被静默忽略，此前这一行的 PASS 并不包含 BARR-C 5.3.b；配置已补 `bugprone-signed-bitwise`，并有回归测试 |
 | 模板 gcc 16 / clang 编译，使用 BARR-C 全部告警门禁并加 `-Werror` | PASS |
 | `test_ledctl.c` 链接真实 Unity，开启 ASan/UBSan 运行（5 个用例） | PASS |
 | `install.sh`：项目安装、拒绝重复安装、`--overwrite`、`--dry-run` | PASS |
 | `assets/ci/*.yml` CI 模板 | 仅做 YAML 解析检查（`data-yaml` PASS）；NOT_RUN：未在 GitHub/GitLab 上实际运行，本机没有 actionlint |
 | P3 新增参考的事实核对 | Cortex-M fault 寄存器地址与位号已对照 CMSIS 头文件核实；RISC-V、ThreadX、MCUboot 内容 NOT_RUN（未对照原文，见 `references/sources.md`） |
-| `scripts/barrc/check.sh` 整体执行 | NOT_RUN：本环境自动审批不允许执行下载的脚本；其中的 clang-format/clang-tidy/词法检查已分别手动执行 |
-| `ceedling test:all` 使用 `assets/ceedling/project.yml` | NOT_RUN：本机没有 Ruby/Ceedling；YAML 键已对照 Ceedling 1.x 文档核对 |
-| Zephyr（`west twister`、`check_compliance.py`）、Linux（checkpatch、KUnit） | NOT_RUN：只是文档规则，本仓库没有对应源码树 |
+| `scripts/barrc/check.sh` 整体执行 | PASS：在 `mcu-baremetal-c` 的 8 个变体上执行，检出符号位运算、缺花括号、隐式声明与命名违规 |
+| `ceedling test:all`（Ceedling 1.2.2） | PASS：`mcu-baremetal-c` 与 `linux-userspace`（CMock + ASan/UBSan）。首次运行发现模板默认的 driver 与 tests/support 目录不存在时 Ceedling 报配置错误，已在模板与文档注明 |
+| FreeRTOS V11.3.3 POSIX 移植上的 host 集成测试 | PASS：`freertos-cpp` 的 `rtos_host`，可检出死锁（看门狗任务超时） |
+| Zephyr v4.5.0：Twister（`native_sim/native/64`，无需 SDK）、树内 checkpatch 与 `.clang-format` | PASS：`zephyr-app` 的 6 个变体 |
+| Zephyr `check_compliance.py` 整体、Linux 内核（checkpatch、KUnit、`dt_binding_check`） | NOT_RUN：前者需要 Zephyr 树内的提交区间；本机没有 Linux 内核源码树 |
+| Renode 1.17、QEMU 上的目标仿真 | NOT_RUN：工具已安装，尚无基于它们的验证用例 |
 | C++ 在目标板上的执行时间、栈水位、ISR 时延 | NOT_RUN：没有目标板；方法见 `references/verification/cpp-testing.md` §6–§7 |
 | 非 GCC 工具链（Clang 裸机、IAR、ARM Compiler 6）上的 C++ 模板与开销 | NOT_RUN：本机无对应工具链/sysroot |
 

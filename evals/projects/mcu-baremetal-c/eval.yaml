@@ -1,0 +1,59 @@
+# 验证工程：MCU 裸机 C（Cortex-M4，BARR-C:2018 + 分层架构 + Ceedling）
+# 预期结果在运行前按规则与工具的设计写定；运行结果与预期不符时，先判断是工具缺陷还是样例错误，
+# 再修正其中一方，并在 docs/validation-report.md 记录。
+project: mcu-baremetal-c
+profile: mcu-baremetal
+summary: "分层的 LED 控制固件：interface + module/ledctl + bsp + platform 向量入口 + app 组合根；Ceedling 测试 ledctl。"
+# project.yml 由 assets/ceedling/project.yml 复制后按本工程目录调整（删去不存在的 driver/ 与 tests/support）
+setup:
+  - copy: ["{skill}/assets/barr-c/.clang-format", ".clang-format"]
+  - copy: ["{skill}/assets/barr-c/.clang-tidy", ".clang-tidy"]
+checks:
+  arch_lint:
+    run: "python3 {skill}/scripts/arch_lint.py ."
+    blocked_codes: [2]
+    rules: [ARCH-001, ARCH-002, ARCH-003, ARCH-004, ARCH-005, ARCH-006]
+  barrc:
+    run: "make -s compdb && sh {skill}/scripts/barrc/check.sh $(find app module interface bsp -name '*.[ch]' | sort)"
+    requires: [clang-format, clang-tidy, make]
+    rules: [C-005, C-009, C-015, CFMT-001, CFMT-002, CFMT-003, CFMT-005, CFMT-006]
+  warnings:
+    run: "make -s warnings"
+    requires: [gcc, make]
+    rules: [C-006, C-007, C-010, C-011, C-012, C-013, C-014]
+  cross_build:
+    run: "make -s cross"
+    requires: [arm-none-eabi-gcc, make]
+    rules: [C-014]
+  unit:
+    run: "ceedling test:all"
+    requires: [ceedling]
+    timeout: 900
+    rules: [TEST-002]
+variants:
+  good: {}
+  bad-layering:
+    violates: [ARCH-001]
+    note: "module 包含 bsp 头文件。首次运行前预期 unit 为 PASS（误以为 Ceedling 的 :source 目录也是头文件路径）；实测 Ceedling 只用 :include（interface、module），模板的 include 配置本身就把分层写进了 host 测试，故预期更正为 unit FAIL（见 evals/TRIAGE.md）"
+    expect: {arch_lint: FAIL, unit: FAIL}
+  bad-hal-call:
+    violates: [ARCH-004]
+    note: "module 直接声明并调用 HAL_Delay：分层检查报 hal_call；命名门禁报函数名非小写；host 测试链接不到 HAL_Delay"
+    expect: {arch_lint: FAIL, barrc: FAIL, unit: FAIL}
+  bad-signed-bitwise:
+    violates: [C-005]
+    expect: {barrc: FAIL}
+  bad-implicit-decl:
+    violates: [C-014]
+    note: "调用未声明的函数：所有编译类检查都失败"
+    expect: {barrc: FAIL, warnings: FAIL, cross_build: FAIL, unit: FAIL}
+  bad-missing-braces:
+    violates: [CFMT-002]
+    expect: {barrc: FAIL}
+  bad-toggle-late:
+    defect: "ledctl_tick 用 > 代替 >=，LED 晚一个节拍翻转"
+    expect: {unit: FAIL}
+  bad-isr-heavy:
+    violates: [ISR-001]
+    note: "SysTick 中断里直接推进 LED 状态并忙等"
+    known_gap: "ISR-001 是 review 规则：platform/ 不在 BARR-C 门禁范围内，arch_lint 不检查 ISR 内容，自动检查全部通过"

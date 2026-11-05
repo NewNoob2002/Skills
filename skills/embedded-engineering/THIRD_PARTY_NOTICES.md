@@ -29,7 +29,7 @@ SOFTWARE.```
 
 ## Barr Group BARR-C enforcement kit
 
-assets/barr-c/ 与 scripts/barrc/check.sh 原样复制自 <https://github.com/netrinomike/barr-c>（2018/，commit 75bcc16）。许可证全文见 assets/barr-c/LICENSE。BARR-C 标准本身版权归 Barr Group 所有，本技能只引用规则编号并意译要点。
+assets/barr-c/ 与 scripts/barrc/check.sh 复制自 <https://github.com/netrinomike/barr-c>（2018/，commit 75bcc16）。唯一的本地修改：`assets/barr-c/.clang-tidy` 在 `hicpp-signed-bitwise` 之后增加 `bugprone-signed-bitwise`，因为 LLVM 23 的 clang-tidy 已移除 hicpp- 名称并静默忽略未知检查名，原配置在新版本上不会检查 5.3.b（2026-11-05 用 clang-tidy 23.1.4 验证）。许可证全文见 assets/barr-c/LICENSE。BARR-C 标准本身版权归 Barr Group 所有，本技能只引用规则编号并意译要点。
 
 ## brunofbloq/embedded-agent-skills
 

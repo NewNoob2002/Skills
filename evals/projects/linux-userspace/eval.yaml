@@ -1,0 +1,46 @@
+# 验证工程：嵌入式 Linux 用户态 C（POSIX）
+# 系统调用经 sysio.h 封装，Ceedling/CMock 注入部分写、EINTR、fsync 失败；测试在 ASan/UBSan 下运行。
+# 预期结果在运行前写定；首次运行的不一致及处理见 evals/TRIAGE.md。
+project: linux-userspace
+profile: linux-userspace
+summary: "守护进程基础库：写满全部字节（部分写与 EINTR）、配置原子保存、消息名解析、信号处理；Ceedling + CMock + ASan/UBSan。"
+checks:
+  warnings:
+    run: "make -s warnings"
+    requires: [gcc, make]
+    rules: [C-006, C-014]
+  cppcheck:
+    run: "cppcheck --enable=warning,portability --error-exitcode=1 --inline-suppr -q src/"
+    requires: [cppcheck]
+    rules: [GEN-010]
+  unit:
+    run: "ceedling test:all"
+    requires: [ceedling]
+    timeout: 900
+    rules: [LNXU-001, LNXU-002, LNXU-007, GEN-010, PROTO-001, TEST-002]
+variants:
+  good: {}
+  bad-partial-write:
+    violates: [LNXU-001]
+    note: "只调用一次 write，把部分写当作成功"
+    expect: {unit: FAIL}
+  bad-eintr:
+    violates: [LNXU-001]
+    note: "把 EINTR 当作错误返回"
+    expect: {unit: FAIL}
+  bad-unchecked-fsync:
+    violates: [LNXU-001, LNXU-002]
+    note: "忽略 fsync 返回值：fsync 失败后仍然 rename，旧配置被未落盘的新内容替换"
+    expect: {unit: FAIL}
+  bad-nonatomic-save:
+    violates: [LNXU-002]
+    note: "直接覆盖目标文件，不经临时文件与 rename"
+    expect: {unit: FAIL}
+  bad-name-overflow:
+    violates: [GEN-010, PROTO-001]
+    note: "复制名字前不检查输出缓冲区容量：超长名字在 ASan 下报 stack-buffer-overflow"
+    expect: {unit: FAIL}
+  bad-signal-printf:
+    violates: [LNXU-004]
+    note: "信号处理函数中调用 fprintf"
+    known_gap: "LNXU-004 是 review 规则：编译告警、cppcheck 与单元测试都不检查信号处理函数中是否只调用 async-signal-safe 函数"

@@ -38,6 +38,7 @@ Checks: >
   misc-unused-parameters,
   misc-unused-using-decls,
   hicpp-signed-bitwise,
+  bugprone-signed-bitwise,
   readability-braces-around-statements,
   readability-function-size,
   readability-identifier-naming,
