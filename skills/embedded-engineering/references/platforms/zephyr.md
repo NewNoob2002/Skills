@@ -1,6 +1,6 @@
 # Zephyr profile
 
-来源：Zephyr 官方 Code Style、Coding Guidelines、Contribution Guidelines、Test Framework 文档（见 [sources.md](sources.md)）。Zephyr 每个版本都可能调整，动手前核对目标仓库所用版本的 `doc/` 与 `scripts/`。
+来源：Zephyr 官方 Code Style、Coding Guidelines、Contribution Guidelines、Test Framework 文档（见 [sources.md](../sources.md)）。Zephyr 每个版本都可能调整，动手前核对目标仓库所用版本的 `doc/` 与 `scripts/`。
 
 ## 1. 代码风格（官方 code style）
 

@@ -35,13 +35,13 @@ description: >-
 | `linux-kernel` | `Kbuild`、`obj-m`/`obj-y`、`MAINTAINERS`、DT bindings | **Linux 内核官方** coding-style + checkpatch | 内核子系统框架 | **KUnit / kselftest** + 构建告警门禁 |
 | `linux-userspace` | 守护进程/工具、Yocto recipe、CMake/Meson 的 Linux 应用 | 项目既有规范；无则 BARR-C 安全核心（C）/ C++ 规范 T3（`.cpp`） | 平台隔离 + 进程/服务边界 | 项目既有框架；无则 Ceedling/Unity |
 
-**语言**：`.c/.h` 按上表的 C 规范；`.cpp/.hpp` 按 [cpp-coding.md](references/cpp-coding.md)，并按资源等级 T0–T3 取舍特性（[cpp-features.md](references/cpp-features.md)）。等级由 `detect_profile.py` 的 `resource_tier` 给出建议，需对照芯片资源确认。`linux-kernel` 不引入 C++；Zephyr 只在应用层使用 C++，内核、驱动、系统初始化保持 C。C++ 测试默认用 CppUTest，C 测试仍用 Ceedling。
+**语言**：`.c/.h` 按上表的 C 规范；`.cpp/.hpp` 按 [cpp/coding.md](references/cpp/coding.md)，并按资源等级 T0–T3 取舍特性（[cpp/features.md](references/cpp/features.md)）。等级由 `detect_profile.py` 的 `resource_tier` 给出建议，需对照芯片资源确认。`linux-kernel` 不引入 C++；Zephyr 只在应用层使用 C++，内核、驱动、系统初始化保持 C。C++ 测试默认用 CppUTest，C 测试仍用 Ceedling。
 
 **规则优先级**（高 → 低）：运行时/授权限制 → 项目显式规则（`AGENTS.md`、`CLAUDE.md`、既有 `.clang-format`、MISRA 偏离记录）→ 目标生态官方规范（Zephyr/Linux，**向上游提交时强制**）→ BARR-C → 分层架构规则 → 本工作流默认值。冲突的详细裁决见 [profiles.md](references/profiles.md)。
 
 ## 2. 选择角色与评审深度
 
-基于 brunofbloq/embedded-agent-skills 的“架构 / 实现 / 验证分离”工作流，详细步骤见 [workflow.md](references/workflow.md)。
+基于 brunofbloq/embedded-agent-skills 的“架构 / 实现 / 验证分离”工作流，详细步骤见 [workflows/workflow.md](references/workflows/workflow.md)。
 
 - **Architect**：新产品、新子系统、跨核/跨进程接口、OS 选型、资源预算变化 → 完整两阶段评审，Phase 1 结束必须拿到**明确批准**才进入实现。有界变更 → architecture delta。孤立缺陷 → fast path，直接交给 Developer。
 - **Developer**：检查 → 定契约 → 核实硬件假设 → 窄范围实现 → 审计故障路径 → 验证 → 报告。
@@ -54,19 +54,19 @@ description: >-
 | 任务 | 读取 |
 | --- | --- |
 | 判定 profile、处理规则冲突 | [profiles.md](references/profiles.md) |
-| 架构评审、阶段门、交接、报告格式 | [workflow.md](references/workflow.md) |
-| MCU 目录分层、依赖方向、接口/驱动设计 | [mcu-architecture.md](references/mcu-architecture.md) |
-| ISR、RTOS 任务/优先级/IPC、DMA、看门狗 | [mcu-isr-rtos.md](references/mcu-isr-rtos.md) |
-| 写/审 C 代码（MCU 与 userspace） | [barr-c.md](references/barr-c.md) |
-| 写/审 C++ 代码：语言标准、命名、类设计、错误处理、生命周期、并发、C SDK 边界 | [cpp-coding.md](references/cpp-coding.md) |
-| 某个 C++ 特性能不能用、资源等级、实测开销 | [cpp-features.md](references/cpp-features.md) |
-| C++ 驱动/业务架构、RAII、ISR→任务、DMA、组合根示例 | [cpp-patterns.md](references/cpp-patterns.md) |
-| C++ 单元测试（CppUTest）、Mock 接缝、开销评估、HIL | [cpp-testing.md](references/cpp-testing.md) |
-| MCU host 单元测试、mock、覆盖率 | [ceedling.md](references/ceedling.md) |
-| Zephyr 应用/驱动/模块 | [zephyr.md](references/zephyr.md) |
-| Linux 内核驱动、DT binding、补丁提交 | [linux-kernel.md](references/linux-kernel.md) |
-| 嵌入式 Linux 用户态 | [linux-userspace.md](references/linux-userspace.md) |
-| 合并前的最终审查清单 | [review-checklist.md](references/review-checklist.md) |
+| 架构评审、阶段门、交接、报告格式 | [workflows/workflow.md](references/workflows/workflow.md) |
+| MCU 目录分层、依赖方向、接口/驱动设计 | [architecture/mcu-architecture.md](references/architecture/mcu-architecture.md) |
+| ISR、RTOS 任务/优先级/IPC、DMA、看门狗 | [rtos/mcu-isr-rtos.md](references/rtos/mcu-isr-rtos.md) |
+| 写/审 C 代码（MCU 与 userspace） | [c/barr-c.md](references/c/barr-c.md) |
+| 写/审 C++ 代码：语言标准、命名、类设计、错误处理、生命周期、并发、C SDK 边界 | [cpp/coding.md](references/cpp/coding.md) |
+| 某个 C++ 特性能不能用、资源等级、实测开销 | [cpp/features.md](references/cpp/features.md) |
+| C++ 驱动/业务架构、RAII、ISR→任务、DMA、组合根示例 | [cpp/patterns.md](references/cpp/patterns.md) |
+| C++ 单元测试（CppUTest）、Mock 接缝、开销评估、HIL | [verification/cpp-testing.md](references/verification/cpp-testing.md) |
+| MCU host 单元测试、mock、覆盖率 | [verification/ceedling.md](references/verification/ceedling.md) |
+| Zephyr 应用/驱动/模块 | [platforms/zephyr.md](references/platforms/zephyr.md) |
+| Linux 内核驱动、DT binding、补丁提交 | [platforms/linux-kernel.md](references/platforms/linux-kernel.md) |
+| 嵌入式 Linux 用户态 | [platforms/linux-userspace.md](references/platforms/linux-userspace.md) |
+| 合并前的最终审查清单 | [verification/review-checklist.md](references/verification/review-checklist.md) |
 | 版本与来源 | [sources.md](references/sources.md) |
 
 ## 4. 机械门禁（能跑就跑，跑不了就报告 NOT_RUN）

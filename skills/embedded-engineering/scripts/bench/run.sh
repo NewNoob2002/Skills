@@ -1,5 +1,5 @@
 #!/bin/bash
-# C++ 特性开销微基准：在“你自己的”工具链与选项下复现 references/cpp-features.md 中的数据。
+# C++ 特性开销微基准：在“你自己的”工具链与选项下复现 references/cpp/features.md 中的数据。
 #
 # 用法：
 #   scripts/bench/run.sh [--cpu cortex-m4] [--float-abi hard|soft] [--fpu fpv4-sp-d16]

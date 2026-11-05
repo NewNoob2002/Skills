@@ -98,7 +98,7 @@ typedef struct
 - 驱动是以总线 Concept 为模板参数的类模板。
 - 组合根在 `app/` 中用 `constinit` 对象搭建。
 
-示例与模板见 [cpp-patterns.md](cpp-patterns.md) 与 `assets/cpp/templates/`。`arch_lint.py` 同时检查 `.cpp/.hpp`。
+示例与模板见 [cpp/patterns.md](../cpp/patterns.md) 与 `assets/cpp/templates/`。`arch_lint.py` 同时检查 `.cpp/.hpp`。
 
 ## 8. 相对 rovinax 原版的修订
 
@@ -108,5 +108,5 @@ typedef struct
 | 禁止所有 `int` | BARR-C 5.2.a 只要求“宽度重要时”用定宽类型；与 SDK/标准库接口冲突 | 宽度重要时必须定宽；`short`/`long` 禁止（5.2.b） |
 | 全局错误类型名 `error_t` | 与 glibc `<errno.h>` 的 `error_t`（GNU 扩展）冲突，Ceedling host 构建可能报重定义；BARR-C 5.1.c 要求公共类型带模块前缀 | 使用 `<proj>_err_t` |
 | 接口函数表无上下文指针 | 无法多实例，难以 mock | 增加 `p_ctx` |
-| 未提及变量前缀 | BARR-C 7.1.j–n 要求 `g_`、`p_`、`pp_`、`b_`、`h_` | 加入 [barr-c.md](barr-c.md) |
+| 未提及变量前缀 | BARR-C 7.1.j–n 要求 `g_`、`p_`、`pp_`、`b_`、`h_` | 加入 [c/barr-c.md](../c/barr-c.md) |
 | `TASK → MODULE` 但 module 可能直接用 RTOS | 破坏可测性 | module 通过 OSAL 接口 |

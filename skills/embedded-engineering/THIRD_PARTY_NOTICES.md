@@ -2,7 +2,7 @@
 
 ## rovinax/embedded-skills
 
-references/mcu-architecture.md 与 references/mcu-isr-rtos.md 改编自 <https://github.com/rovinax/embedded-skills>（已修订，见各文件“相对 rovinax 原版的修订”一节）。
+references/architecture/mcu-architecture.md 与 references/rtos/mcu-isr-rtos.md 改编自 <https://github.com/rovinax/embedded-skills>（已修订，见各文件“相对 rovinax 原版的修订”一节）。
 
 ```text
 MIT License
@@ -33,7 +33,7 @@ assets/barr-c/ 与 scripts/barrc/check.sh 原样复制自 <https://github.com/ne
 
 ## brunofbloq/embedded-agent-skills
 
-references/workflow.md 借鉴其工作流结构（角色分工、两阶段架构门、证据级别、任务契约），为独立改写，未复制原文。该仓库未声明许可证。
+references/workflows/workflow.md 借鉴其工作流结构（角色分工、两阶段架构门、证据级别、任务契约），为独立改写，未复制原文。该仓库未声明许可证。
 
 ## Modern Embedded C++ 模块的参考来源
 

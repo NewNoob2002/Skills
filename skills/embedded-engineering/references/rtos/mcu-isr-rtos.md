@@ -64,9 +64,9 @@ imu_drdy_isr (void)
 
 ## 6. C++ 对应
 
-C++ 版本的模式见 [cpp-patterns.md](cpp-patterns.md) §4、§6：`IrqLock`、`OsMutex` + `std::lock_guard`、`SpscRing`、`etl::queue_spsc_isr`、`DmaRxLease`。
+C++ 版本的模式见 [cpp/patterns.md](../cpp/patterns.md) §4、§6：`IrqLock`、`OsMutex` + `std::lock_guard`、`SpscRing`、`etl::queue_spsc_isr`、`DmaRxLease`。
 
-原子操作的链接与 lock-free 限制（ARMv6-M 上 32 位 RMW 链接失败，32 位 MCU 上 64 位原子链接失败）见 [cpp-coding.md](cpp-coding.md) §7。
+原子操作的链接与 lock-free 限制（ARMv6-M 上 32 位 RMW 链接失败，32 位 MCU 上 64 位原子链接失败）见 [cpp/coding.md](../cpp/coding.md) §7。
 
 ## 7. 相对 rovinax 原版的修订
 

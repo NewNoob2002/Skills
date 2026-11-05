@@ -1,6 +1,6 @@
 # C++ 资源等级与特性决策表
 
-不简单禁止现代 C++：按“代价是否可见、是否有界”取舍。本文件给出资源等级（T0–T3）、实时路径规则、特性决策表和实测数据。编码细节见 [cpp-coding.md](cpp-coding.md)，模式见 [cpp-patterns.md](cpp-patterns.md)，验证方法见 [cpp-testing.md](cpp-testing.md)。
+不简单禁止现代 C++：按“代价是否可见、是否有界”取舍。本文件给出资源等级（T0–T3）、实时路径规则、特性决策表和实测数据。编码细节见 [cpp/coding.md](coding.md)，模式见 [cpp/patterns.md](patterns.md)，验证方法见 [verification/cpp-testing.md](../verification/cpp-testing.md)。
 
 ## 1. 适用范围
 
@@ -150,4 +150,4 @@ Cortex-M0+（`-mfloat-abi=soft`）基线为 468 B，其余增量与 M4 同量级
 
 - 这些是隔离的微基准增量，不能直接相加；共享的运行时（如 malloc）只计一次。
 - 换编译器（Clang、IAR、ARM Compiler 6）、libc（picolibc）或优化级别后数字会变，以项目 ELF 上的 `cpp_cost.py diff` 为准。
-- 执行时间未在此测量，需按 [cpp-testing.md](cpp-testing.md) §6 在目标板上测。
+- 执行时间未在此测量，需按 [verification/cpp-testing.md](../verification/cpp-testing.md) §6 在目标板上测。

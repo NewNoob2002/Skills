@@ -1,6 +1,6 @@
 # C++ 架构模式与示例
 
-分层规则不变（[mcu-architecture.md](mcu-architecture.md)）：`APP → MODULE → INTERFACE → BSP/DRIVER → PLATFORM`，`scripts/arch_lint.py` 同样检查 `.cpp/.hpp`。
+分层规则不变（[architecture/mcu-architecture.md](../architecture/mcu-architecture.md)）：`APP → MODULE → INTERFACE → BSP/DRIVER → PLATFORM`，`scripts/arch_lint.py` 同样检查 `.cpp/.hpp`。
 
 示例的完整版本在 `assets/cpp/templates/`。它们已用 arm-none-eabi-g++ 15.3 在 C++17/C++20 × Cortex-M0+/M4/M7 下以严格告警加 `-Werror` 编译，并通过 C++ clang-tidy 配置；CppUTest 测试在 host 上以 ASan/UBSan 运行通过（见 `tests/cpp/run_cpp_checks.sh`）。
 

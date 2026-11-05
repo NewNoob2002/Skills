@@ -12,7 +12,7 @@
 set -eu
 
 SKILL_NAME=embedded-engineering
-SRC_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$SKILL_NAME
+SRC_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/skills/$SKILL_NAME
 
 agent=""
 scope=project

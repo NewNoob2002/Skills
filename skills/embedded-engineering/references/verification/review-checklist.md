@@ -4,7 +4,7 @@
 
 ## A. 所有 profile
 
-- [ ] profile 判定有证据；规则冲突按 [profiles.md](profiles.md) 裁决
+- [ ] profile 判定有证据；规则冲突按 [profiles.md](../profiles.md) 裁决
 - [ ] 硬件事实（寄存器、位、时钟、引脚、DMA、errata）有来源；无来源的标 `UNKNOWN`
 - [ ] 所有等待有界，超时时钟在当前启动/休眠阶段有效；tick 回绕处理正确
 - [ ] 错误返回值全部检查并传播；外部输入校验长度与范围
@@ -60,7 +60,7 @@
 
 ## F. C++（任何 profile 中的 `.cpp/.hpp`）
 
-- [ ] 资源等级已确定，特性使用符合 [cpp-features.md](cpp-features.md) 决策表
+- [ ] 资源等级已确定，特性使用符合 [cpp/features.md](../cpp/features.md) 决策表
 - [ ] `cpp_cost.py check <elf> --tier <Tn>` 通过；`--allow` 例外有评审理由；如有预算文件，段预算通过
 - [ ] 与基线相比的 `cpp_cost.py diff` 增量已报告
 - [ ] 目标构建使用 `-fno-exceptions -fno-rtti -fno-use-cxa-atexit`（T0–T2），严格告警组 `-Werror`，第三方头 `-isystem`

@@ -4,17 +4,17 @@
 
 | 层 | 来源 | 在技能中的位置 |
 | --- | --- | --- |
-| Agent 工作流 | brunofbloq/embedded-agent-skills | `references/workflow.md`（Architect → Developer → QA、两阶段架构门、证据级别） |
-| MCU 架构规则 | rovinax/embedded-skills（已修订） | `references/mcu-architecture.md`、`mcu-isr-rtos.md`、`scripts/arch_lint.py` |
-| C 代码规范 | BARR-C:2018 + Barr Group 官方 enforcement kit | `references/barr-c.md`、`assets/barr-c/`、`scripts/barrc/check.sh` |
-| MCU 测试 | Ceedling 1.x（Unity + CMock） | `references/ceedling.md`、`assets/ceedling/project.yml`、`assets/templates/tests/` |
-| 平台官方规范 | Zephyr、Linux kernel 树内文档 | `references/zephyr.md`、`linux-kernel.md`、`linux-userspace.md` |
-| Modern Embedded C++ | Pigweed、modm、ETL、C++ Core Guidelines、Zephyr C++ 文档 + 本地实测开销 | `references/cpp-coding.md`、`cpp-features.md`、`cpp-patterns.md`、`assets/cpp/`、`scripts/cpp_cost.py`、`scripts/bench/` |
-| C++ 测试 | CppUTest + CppUMock | `references/cpp-testing.md`、`assets/cpp/templates/tests/` |
+| Agent 工作流 | brunofbloq/embedded-agent-skills | `references/workflows/workflow.md`（Architect → Developer → QA、两阶段架构门、证据级别） |
+| MCU 架构规则 | rovinax/embedded-skills（已修订） | `references/architecture/mcu-architecture.md`、`references/rtos/mcu-isr-rtos.md`、`scripts/arch_lint.py` |
+| C 代码规范 | BARR-C:2018 + Barr Group 官方 enforcement kit | `references/c/barr-c.md`、`assets/barr-c/`、`scripts/barrc/check.sh` |
+| MCU 测试 | Ceedling 1.x（Unity + CMock） | `references/verification/ceedling.md`、`assets/ceedling/project.yml`、`assets/templates/tests/` |
+| 平台官方规范 | Zephyr、Linux kernel 树内文档 | `references/platforms/zephyr.md`、`references/platforms/linux-kernel.md`、`references/platforms/linux-userspace.md` |
+| Modern Embedded C++ | Pigweed、modm、ETL、C++ Core Guidelines、Zephyr C++ 文档 + 本地实测开销 | `references/cpp/coding.md`、`references/cpp/features.md`、`references/cpp/patterns.md`、`assets/cpp/`、`scripts/cpp_cost.py`、`scripts/bench/` |
+| C++ 测试 | CppUTest + CppUMock | `references/verification/cpp-testing.md`、`assets/cpp/templates/tests/` |
 
 ## 为什么是“Skill + AGENTS.md + 脚本”
 
-- **Skill**：按需加载。`SKILL.md` 只有约 80 行（profile 选择、角色、reference 路由表），十几页的规则只在相关任务时读取，不占每次会话的上下文。
+- **Skill**：按需加载。`SKILL.md` 不到 100 行（profile 选择、角色、reference 路由表），十几页的规则只在相关任务时读取，不占每次会话的上下文。
 - **AGENTS.md（项目内）**：保存这个仓库特有、必须每次都知道的事实，如芯片型号、SDK 版本、构建/测试命令、硬件授权范围。这些信息不应该写进通用技能。
 - **脚本与配置**：可以机械检查的规则（格式、命名、分层依赖）交给工具判定，而不是靠模型“记得遵守”。BARR-C 部分直接使用 Barr Group 官方 kit。
 
@@ -39,9 +39,18 @@ C++ 部分不简单禁止现代特性，而是按资源等级（T0 极小 MCU �
 ## 目录
 
 ```text
-embedded-engineering/
+skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此目录）
 ├── SKILL.md                    # 入口：护栏、profile、角色、路由
 ├── references/                 # 按需读取的规则
+│   ├── profiles.md             #   profile 判定与冲突裁决
+│   ├── sources.md              #   来源、版本、许可
+│   ├── workflows/              #   Architect → Developer → QA、阶段门
+│   ├── architecture/           #   MCU 分层、依赖方向、接口/驱动设计
+│   ├── c/                      #   BARR-C 规则
+│   ├── cpp/                    #   C++ 编码、特性取舍（T0–T3）、模式
+│   ├── rtos/                   #   ISR、RTOS、DMA、看门狗
+│   ├── platforms/              #   Zephyr、Linux kernel、Linux userspace
+│   └── verification/           #   Ceedling、CppUTest、审查清单
 ├── scripts/
 │   ├── detect_profile.py       # profile 识别（只读，JSON）
 │   ├── arch_lint.py            # 分层依赖/HAL/寄存器访问检查（C 与 C++）
@@ -111,16 +120,16 @@ install.sh                      # 安装器
 | `scripts/barrc/check.sh` 整体执行 | NOT_RUN：本环境自动审批不允许执行下载的脚本；其中的 clang-format/clang-tidy/词法检查已分别手动执行 |
 | `ceedling test:all` 使用 `assets/ceedling/project.yml` | NOT_RUN：本机没有 Ruby/Ceedling；YAML 键已对照 Ceedling 1.x 文档核对 |
 | Zephyr（`west twister`、`check_compliance.py`）、Linux（checkpatch、KUnit） | NOT_RUN：只是文档规则，本仓库没有对应源码树 |
-| C++ 在目标板上的执行时间、栈水位、ISR 时延 | NOT_RUN：没有目标板；方法见 `references/cpp-testing.md` §6–§7 |
+| C++ 在目标板上的执行时间、栈水位、ISR 时延 | NOT_RUN：没有目标板；方法见 `references/verification/cpp-testing.md` §6–§7 |
 | 非 GCC 工具链（Clang 裸机、IAR、ARM Compiler 6）上的 C++ 模板与开销 | NOT_RUN：本机无对应工具链/sysroot |
 
 ## 维护
 
-- 上游版本与核实日期见 `embedded-engineering/references/sources.md`；BARR-C:2026 发布后替换 `assets/barr-c/` 并更新 `barr-c.md`。
+- 上游版本与核实日期见 `skills/embedded-engineering/references/sources.md`；BARR-C:2026 发布后替换 `assets/barr-c/` 并更新 `references/c/barr-c.md`。
 - 修改脚本后运行 `python3 -m unittest discover -s tests -v`。完整运行 C++ 用例需要：
   - `arm-none-eabi-g++`（用于 cpp_cost 与模板矩阵）
   - `ETL_INCLUDE=<etl>/include`
-  - `CPPUTEST_PREFIX=<CppUTest 安装前缀>`，用于构建 CppUTest 模板；构建方法见 `references/cpp-testing.md` §2
+  - `CPPUTEST_PREFIX=<CppUTest 安装前缀>`，用于构建 CppUTest 模板；构建方法见 `references/verification/cpp-testing.md` §2
 - 修改 C++ 模板后运行 `ETL_INCLUDE=<etl>/include tests/cpp/run_cpp_checks.sh`。
-- 更换工具链或编译选项后运行 `embedded-engineering/scripts/bench/run.sh`，并更新 `references/cpp-features.md` §4。
-- 修改模板后运行 `clang-format --style=file:embedded-engineering/assets/barr-c/.clang-format --dry-run --Werror embedded-engineering/assets/templates/*/*.[ch]`。
+- 更换工具链或编译选项后运行 `skills/embedded-engineering/scripts/bench/run.sh`，并更新 `references/cpp/features.md` §4。
+- 修改模板后运行 `clang-format --style=file:skills/embedded-engineering/assets/barr-c/.clang-format --dry-run --Werror skills/embedded-engineering/assets/templates/*/*.[ch]`。

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SKILL = Path(__file__).resolve().parent.parent / "embedded-engineering"
+SKILL = Path(__file__).resolve().parent.parent / "skills" / "embedded-engineering"
 ARCH_LINT = SKILL / "scripts" / "arch_lint.py"
 DETECT = SKILL / "scripts" / "detect_profile.py"
 TEMPLATES = SKILL / "assets" / "templates"

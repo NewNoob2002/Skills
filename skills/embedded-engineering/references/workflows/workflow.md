@@ -61,7 +61,7 @@
 
 | 后端 | 适合证明 | 不能证明 |
 | --- | --- | --- |
-| Host 单元测试（Ceedling / ztest unit / KUnit） | 状态机、协议解析、算法、驱动对总线接口的调用序列 | 时序、中断抢占、DMA/cache、电气 |
+| Host 单元测试（Ceedling / CppUTest / ztest unit / KUnit） | 状态机、协议解析、算法、驱动对总线接口的调用序列 | 时序、中断抢占、DMA/cache、电气 |
 | 静态分析（clang-tidy、编译告警、checkpatch、sparse） | 规则符合性、部分缺陷类别 | 运行期行为 |
 | 仿真（Renode、QEMU、`native_sim`） | 模型覆盖的 CPU/外设行为、集成流程 | 未建模外设；模型缺失时记 `BLOCKED_BY_MODEL` |
 | HIL / 实板 | 真实时序、复位、功耗、外设交互 | 未覆盖的环境条件 |

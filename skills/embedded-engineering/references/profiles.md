@@ -6,22 +6,22 @@
 2. 运行 `scripts/detect_profile.py <repo>`，核对它给出的证据文件，而不是只看结论。
 3. 按目录划分 profile。常见混合形态：
    - `firmware/`（`mcu-rtos`）+ `linux/drivers/`（`linux-kernel`）+ `app/`（`linux-userspace`）
-   - Zephyr 应用中的纯算法库：仍属 `zephyr`，但可按 §3 额外用 Ceedling 做 host 测试。
+   - Zephyr 应用中的纯算法库：仍属 `zephyr`；不依赖 Zephyr API 的部分可额外用 Ceedling（C）或 CppUTest（C++）做 host 测试（见 §5）。
 4. 判定不了且会影响结果（例如要不要改成 Allman 风格）时询问用户；不影响结果时选择与周边代码一致的规则并在报告中说明。
 
 ## 2. 每个 profile 的规范来源
 
 | Profile | 格式/命名 | 语义/安全规则 | 架构 | 测试 | 提交 |
 | --- | --- | --- | --- | --- | --- |
-| `mcu-baremetal` | BARR-C 全量 | BARR-C 全量 + 项目 MISRA（如有） | `mcu-architecture.md` | Ceedling | BARR-C 生成代码政策 |
-| `mcu-rtos` | BARR-C 全量 | 同上 + `mcu-isr-rtos.md` | `mcu-architecture.md` | Ceedling | BARR-C 生成代码政策 |
+| `mcu-baremetal` | BARR-C 全量 | BARR-C 全量 + 项目 MISRA（如有） | `architecture/mcu-architecture.md` | Ceedling（C）/ CppUTest（C++） | BARR-C 生成代码政策 |
+| `mcu-rtos` | BARR-C 全量 | 同上 + `rtos/mcu-isr-rtos.md` | `architecture/mcu-architecture.md` | Ceedling（C）/ CppUTest（C++） | BARR-C 生成代码政策 |
 | `zephyr` | Zephyr code style | Zephyr coding guidelines（MISRA C:2012 子集）+ BARR-C 安全核心中不冲突部分 | Zephyr 设备模型 | ztest + Twister | Zephyr DCO / `Assisted-by` |
 | `linux-kernel` | `coding-style.rst` + checkpatch | 内核惯例 + BARR-C 安全核心中不冲突部分 | 内核子系统框架 | KUnit / kselftest | DCO、工具生成内容披露 |
-| `linux-userspace` | 项目既有；无则 BARR-C 格式层可选 | BARR-C 安全核心 | 平台隔离 | 项目既有 / Ceedling | 项目约定 |
+| `linux-userspace` | 项目既有；无则 BARR-C 格式层可选 | BARR-C 安全核心 | 平台隔离 | 项目既有；无则 Ceedling（C）/ CppUTest（C++） | 项目约定 |
 
 ## 3. 冲突裁决矩阵
 
-“安全核心”指 [barr-c.md](barr-c.md) §2 中不依赖格式的规则；“格式层”指 §3。
+“安全核心”指 [c/barr-c.md](c/barr-c.md) §2 中不依赖格式的规则；“格式层”指 §3。
 
 | 主题 | BARR-C | Zephyr | Linux kernel | 裁决 |
 | --- | --- | --- | --- | --- |
@@ -50,14 +50,14 @@
 
 ## 5. C/C++ 混合工程
 
-- 规则按文件类型划分：`.c` 与只含 C 构造的 `.h` 适用 C 规范（MCU 为 BARR-C）；`.cpp/.hpp/.cc/.hh` 适用 [cpp-coding.md](cpp-coding.md)。C 头被 C++ 包含时，仍按 C 规范编写，并加 `extern "C"` 保护。
+- 规则按文件类型划分：`.c` 与只含 C 构造的 `.h` 适用 C 规范（MCU 为 BARR-C）；`.cpp/.hpp/.cc/.hh` 适用 [cpp/coding.md](cpp/coding.md)。C 头被 C++ 包含时，仍按 C 规范编写，并加 `extern "C"` 保护。
 - C++ 适用性：`mcu-*` 可用；`zephyr` 只在应用层用（内核、驱动、`SYS_INIT` 保持 C）；`linux-kernel` 不用；`linux-userspace` 按 T3。
-- 资源等级 T0–T3 决定 C++ 特性取舍（[cpp-features.md](cpp-features.md)）。`detect_profile.py` 的 `resource_tier` 从链接脚本推算，属建议值。
+- 资源等级 T0–T3 决定 C++ 特性取舍（[cpp/features.md](cpp/features.md)）。`detect_profile.py` 的 `resource_tier` 从链接脚本推算，属建议值。
 - 格式：C++ 沿用 BARR-C 布局，列宽 100（`assets/cpp/.clang-format`）；C 用 `assets/barr-c/.clang-format`。同目录混放时按文件类型分别调用 clang-format。
 - 命名：C++ 不用 BARR-C 的 `p_`/`b_`/`h_` 类型前缀，用命名空间代替模块前缀；可变全局变量保留 `g_` 作用域前缀。
-- 测试：C 用 Ceedling，C++ 用 CppUTest；Zephyr 统一用 ztest。
+- 测试：C 用 Ceedling，C++ 用 CppUTest；Zephyr 以 ztest + Twister 为准，只有不依赖 Zephyr API 的纯逻辑库可额外做 Ceedling/CppUTest host 测试。
 
-| 主题 | C（BARR-C） | C++（cpp-coding.md） |
+| 主题 | C（BARR-C） | C++（cpp/coding.md） |
 | --- | --- | --- |
 | 列宽 | 80 | 100 |
 | 模块前缀 | `motor_set_speed()` | `proj::motor::set_speed()` |

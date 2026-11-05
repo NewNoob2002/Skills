@@ -1,6 +1,6 @@
 # Embedded Linux userspace profile
 
-适用于运行在嵌入式 Linux 上的守护进程、工具、HMI 后端、协议网关等。没有统一的官方 C 风格，规则来源依次为：项目既有规范 → 所在发行版/框架规范（如 systemd 风格、GNOME、Yocto recipe 风格）→ BARR-C 安全核心（[barr-c.md](barr-c.md) §2）。
+适用于运行在嵌入式 Linux 上的守护进程、工具、HMI 后端、协议网关等。没有统一的官方 C 风格，规则来源依次为：项目既有规范 → 所在发行版/框架规范（如 systemd 风格、GNOME、Yocto recipe 风格）→ BARR-C 安全核心（[c/barr-c.md](../c/barr-c.md) §2）。
 
 ## 1. 架构
 
@@ -22,7 +22,7 @@
 
 | 层 | 工具 |
 | --- | --- |
-| 单元测试 | 项目既有框架；无则 Ceedling/Unity（[ceedling.md](ceedling.md)），或 cmocka |
+| 单元测试 | 项目既有框架；无则 Ceedling/Unity（[verification/ceedling.md](../verification/ceedling.md)），或 cmocka |
 | 运行期检测 | `-fsanitize=address,undefined`（host 与支持的目标），Valgrind |
 | 静态检查 | 编译告警门禁、clang-tidy、cppcheck；采用 BARR-C 格式层时运行 `scripts/barrc/check.sh` |
 | 集成 | QEMU 镜像、目标板 + 实际外设；记录镜像版本与内核版本 |

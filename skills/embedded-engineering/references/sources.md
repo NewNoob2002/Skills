@@ -24,6 +24,6 @@
 - Zephyr 的 `Assisted-by:` 格式与 coding guidelines 规则表（随版本变化）。
 - Linux 分配辅助宏（`kmalloc_obj` 等为较新内核引入，旧 BSP 内核没有）。
 - Ceedling 1.x 次版本新增的选项（Partials、Sanitize 插件）。
-- C++ 开销表随工具链变化：新工具链落地时运行 `scripts/bench/run.sh` 并更新 `cpp-features.md` §4。
+- C++ 开销表随工具链变化：新工具链落地时运行 `scripts/bench/run.sh` 并更新 `cpp/features.md` §4。
 - CppUTest 新发布版（v4.0 之后）的 CMake 目标名与 CMake 版本要求。
 - BARR-C:2026 版发布后（官方 kit 计划提供 `2026/` 目录与机器可读规则清单），替换本技能的 2018 基线。

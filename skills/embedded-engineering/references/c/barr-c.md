@@ -2,7 +2,7 @@
 
 - 标准原文（免费 PDF/在线版）：<https://barrgroup.com/embedded-c-coding-standard>。下文规则是**意译摘要**，有疑问以原文为准。
 - 官方 enforcement kit（MIT，Barr Group）：<https://github.com/netrinomike/barr-c>，本技能在 `assets/barr-c/` 与 `scripts/barrc/check.sh` 中附带其 2018 版副本。
-- **只适用于 C 文件**（`.c` 与只含 C 构造的 `.h`）。C++ 文件见 [cpp-coding.md](cpp-coding.md)，二者的对照见 [profiles.md](profiles.md) §5。
+- **只适用于 C 文件**（`.c` 与只含 C 构造的 `.h`）。C++ 文件见 [cpp/coding.md](../cpp/coding.md)，二者的对照见 [profiles.md](../profiles.md) §5。
 - 2018 版共 167 条，其中 45 条标为 **bug-killing**（下表标 ★）。kit 机械门禁覆盖 61 条，其余约 100 条需要代码审查。
 
 ## 1. 适用方式
@@ -11,7 +11,7 @@
 | --- | --- | --- | --- |
 | `mcu-baremetal`、`mcu-rtos` | 全部 | 全部 | 全部 |
 | `linux-userspace` | 全部 | 项目未定义风格时采用 | 采用格式层时启用 |
-| `zephyr`、`linux-kernel` | 仅与官方规范不冲突的条目（见 [profiles.md](profiles.md) §3） | **不适用** | 只用编译告警；格式走官方工具 |
+| `zephyr`、`linux-kernel` | 仅与官方规范不冲突的条目（见 [profiles.md](../profiles.md) §3） | **不适用** | 只用编译告警；格式走官方工具 |
 
 ## 2. 安全核心（与格式无关）
 

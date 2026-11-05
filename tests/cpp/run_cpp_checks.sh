@@ -4,7 +4,7 @@
 # 依赖：arm-none-eabi-g++；clang-format、clang-tidy 可选（缺失时报告 SKIP）。
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
-SKILL=$(cd "$HERE/../../embedded-engineering" && pwd)
+SKILL=$(cd "$HERE/../../skills/embedded-engineering" && pwd)
 T=$SKILL/assets/cpp/templates
 : "${ETL_INCLUDE:?set ETL_INCLUDE to the ETL include directory}"
 CXX=${CXX_CROSS:-arm-none-eabi-g++}

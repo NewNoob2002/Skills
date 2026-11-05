@@ -103,7 +103,7 @@ def parse_memory_regions(text):
 
 
 def tier_for(flash, ram):
-    """按 references/cpp-features.md §2：任一条件满足即归入较低等级。"""
+    """按 references/cpp/features.md §2：任一条件满足即归入较低等级。"""
     if (flash and flash <= TIER_T0_FLASH) or (ram and ram <= TIER_T0_RAM):
         return "T0"
     if flash >= TIER_T2_FLASH or ram >= TIER_T2_RAM:

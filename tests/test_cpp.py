@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL = ROOT / "embedded-engineering"
+SKILL = ROOT / "skills" / "embedded-engineering"
 COST = SKILL / "scripts" / "cpp_cost.py"
 BENCH_SRC = SKILL / "scripts" / "bench" / "src"
 CXX = shutil.which("arm-none-eabi-g++")

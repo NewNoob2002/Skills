@@ -9,7 +9,7 @@
   diff <base.elf> <new.elf> [--top N]
       对比两个 ELF 的 text/data/bss 与符号级大小增量（A/B 评估一项改动的真实开销）。
 
-规则依据见 references/cpp-features.md。工具：默认依次尝试 arm-none-eabi-、llvm-、无前缀的
+规则依据见 references/cpp/features.md。工具：默认依次尝试 arm-none-eabi-、llvm-、无前缀的
 nm/size；其他架构用 --prefix（如 riscv32-unknown-elf-）或 --nm/--size 指定。
 退出码：0 通过；1 有 fail 级发现或超出预算；2 参数、工具或文件错误。仅依赖 Python 标准库（3.8+）。
 """

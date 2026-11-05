@@ -1,14 +1,14 @@
 # C++ 单元测试、Mock、静态分析、开销评估与 HIL
 
-证据分级沿用 [workflow.md](workflow.md)：host、静态、仿真、HIL、实测各自给出 `PASS / FAIL / NOT_RUN / BLOCKED`。
+证据分级沿用 [workflows/workflow.md](../workflows/workflow.md)：host、静态、仿真、HIL、实测各自给出 `PASS / FAIL / NOT_RUN / BLOCKED`。
 
 ## 1. 框架选择
 
 | 代码 | 默认 | 备选 |
 | --- | --- | --- |
-| C 模块（MCU） | Ceedling（[ceedling.md](ceedling.md)） | CppUTest（与 C++ 统一时） |
+| C 模块（MCU） | Ceedling（[verification/ceedling.md](ceedling.md)） | CppUTest（与 C++ 统一时） |
 | C++ 模块（MCU） | **CppUTest** + CppUMock | GoogleTest/gMock（仅 host，项目已使用时）；Pigweed 项目用 `pw_unit_test` |
-| Zephyr 应用（C/C++） | ztest + Twister（[zephyr.md](zephyr.md)） | 纯逻辑可额外用 CppUTest |
+| Zephyr 应用（C/C++） | ztest + Twister（[platforms/zephyr.md](../platforms/zephyr.md)） | 纯逻辑可额外用 CppUTest |
 | Linux 用户态 C++ | 项目既有框架 | GoogleTest / CppUTest |
 
 ## 2. CppUTest 要点
@@ -73,7 +73,7 @@ build-host/host_tests -r2 -s        # 重复两次 + 随机顺序：暴露测试
 
 ## 6. 开销评估（Flash / RAM / 栈 / 时间）
 
-原则：同一工具链、同一选项下做 A/B 对比（基线提交与候选提交），只看增量。[cpp-features.md](cpp-features.md) 中的微基准只作先验，最终以项目 ELF 为准。
+原则：同一工具链、同一选项下做 A/B 对比（基线提交与候选提交），只看增量。[cpp/features.md](../cpp/features.md) 中的微基准只作先验，最终以项目 ELF 为准。
 
 | 指标 | 方法 | 门禁 |
 | --- | --- | --- |

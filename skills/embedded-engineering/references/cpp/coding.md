@@ -1,6 +1,6 @@
 # Modern Embedded C++ 编码规范
 
-适用于 `.cpp/.hpp` 文件（`mcu-*`、`zephyr` 应用层、`linux-userspace`）。C 文件继续适用 [barr-c.md](barr-c.md)。等级 T0–T3 与特性取舍见 [cpp-features.md](cpp-features.md)。
+适用于 `.cpp/.hpp` 文件（`mcu-*`、`zephyr` 应用层、`linux-userspace`）。C 文件继续适用 [c/barr-c.md](../c/barr-c.md)。等级 T0–T3 与特性取舍见 [cpp/features.md](features.md)。
 
 规则来源：
 
@@ -10,7 +10,7 @@
 - C++ Core Guidelines：下文括号中的编号，如 R.1、C.35。
 - 平台文档：Zephyr C++ 文档。
 
-均为意译，原文见 [sources.md](sources.md)。
+均为意译，原文见 [sources.md](../sources.md)。
 
 ## 1. 语言标准
 
@@ -123,7 +123,7 @@
   - 调试构建中断言调用上下文：`xPortIsInsideInterrupt()`、`k_is_in_isr()`。
 - **ThreadX**：ISR 中调用服务时等待选项只能是 `TX_NO_WAIT`；RT 路径用 block pool（确定性），不用 byte pool。
 - **Zephyr**：内核 API 是 C，C++ 只写应用层包装；没有 `std::thread`、`std::mutex`。
-- **FreeRTOS**：调用 FreeRTOS API 的 ISR 优先级约束见 [mcu-isr-rtos.md](mcu-isr-rtos.md) §3；`IrqLock` 会屏蔽全部可屏蔽中断，只适合极短区间。
+- **FreeRTOS**：调用 FreeRTOS API 的 ISR 优先级约束见 [rtos/mcu-isr-rtos.md](../rtos/mcu-isr-rtos.md) §3；`IrqLock` 会屏蔽全部可屏蔽中断，只适合极短区间。
 - **Linux 用户态（T3）**：可用 `std::thread/mutex/condition_variable`；RT 线程用 `SCHED_FIFO` + `mlockall` + 启动期预分配。
 
 ## 8. C SDK 与 C++ 的边界
