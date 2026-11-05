@@ -67,7 +67,10 @@ skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此�
 │       └── templates/          #   驱动/总线/RAII/ISR 队列/DMA/组合根/CppUTest 模板
 ├── agents/openai.yaml          # Codex 显示元数据
 └── THIRD_PARTY_NOTICES.md
+tools/validate_skill.py         # Skill 自检：frontmatter、链接/路径/§ 引用、可达性、脚本、数据文件、打包卫生
+tools/validate_skill.json       # 每个技能的自检配置（SKILL.md 行数预算、外部源码树路径白名单）
 tests/test_scripts.py           # arch_lint、detect_profile 回归测试
+tests/test_validate_skill.py    # validate_skill 变异测试（逐项注入缺陷）与 YAML 子集解析测试
 tests/test_cpp.py               # cpp_cost、C++ 模板矩阵、CppUTest 模板
 tests/cpp/                      # C++ 模板编译与负向编译检查
 install.sh                      # 安装器
@@ -103,7 +106,8 @@ install.sh                      # 安装器
 
 | 项 | 结果 |
 | --- | --- |
-| `python3 -m unittest discover -s tests -v`（25 个用例，见下行环境变量；未设置时 C++ 工具链相关用例跳过） | PASS |
+| `python3 tools/validate_skill.py`（技能 11 项 + README 3 项检查） | PASS |
+| `python3 -m unittest discover -s tests -v`（58 个用例，见下行环境变量；未设置时 C++ 工具链相关用例跳过） | PASS |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |
 | C++ 模板 clang-format（`assets/cpp/.clang-format`）与 clang-tidy（`assets/cpp/.clang-tidy`，含头文件） | PASS |
@@ -126,6 +130,7 @@ install.sh                      # 安装器
 ## 维护
 
 - 上游版本与核实日期见 `skills/embedded-engineering/references/sources.md`；BARR-C:2026 发布后替换 `assets/barr-c/` 并更新 `references/c/barr-c.md`。
+- 修改技能内任何文件后运行 `python3 tools/validate_skill.py`（`--json` 输出机器可读结果；退出码 0 无 FAIL、1 有 FAIL、2 用法错误）。约定：反引号中相对技能根的路径不加 `./`；`./` 开头的视为外部源码树路径（如 `./scripts/checkpatch.pl`），不检查；不带 `./` 的外部路径登记到 `tools/validate_skill.json` 的 `external_paths`。引用其他文件的章节时写成 `.md` 链接或路径加 `§N`。
 - 修改脚本后运行 `python3 -m unittest discover -s tests -v`。完整运行 C++ 用例需要：
   - `arm-none-eabi-g++`（用于 cpp_cost 与模板矩阵）
   - `ETL_INCLUDE=<etl>/include`

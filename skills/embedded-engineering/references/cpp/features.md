@@ -51,11 +51,11 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `namespace`、`enum class`、引用、`auto`、结构化绑定、`if constexpr`、`[[nodiscard]]`、`static_assert` | 0 | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | `class` 封装、非虚成员 | 0 | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| RAII（锁、片选、资源句柄） | ≈0 | ✅ | ✅ | ✅ | ✅ | ✅ | 静态对象析构见 cpp-coding §6 |
+| RAII（锁、片选、资源句柄） | ≈0 | ✅ | ✅ | ✅ | ✅ | ✅ | 静态对象析构见 [cpp/coding.md](coding.md) §6 |
 | `constexpr` 函数/变量 | 0 运行期 | ✅ | ✅ | ✅ | ✅ | ✅ | 非平凡 `constexpr` 函数在运行期调用时可能内联膨胀 |
 | `consteval` 查找表 | CRC8 表 +268 B Flash、0 RAM；运行期生成 +52 B Flash、+256 B RAM | ✅ | ✅ | ✅ | ✅ | ✅ | 按 Flash 与 RAM 哪个更紧选择 |
 | `constinit`（C++20） | 0 | ✅ | ✅ | ✅ | ✅ | — | C++17 用 `constexpr` 构造 |
-| 函数/类模板 | 每个实例一份代码 | ⚠️ | ✅ | ✅ | ✅ | ✅ | 控制实例数（cpp-coding §9） |
+| 函数/类模板 | 每个实例一份代码 | ⚠️ | ✅ | ✅ | ✅ | ✅ | 控制实例数（[cpp/coding.md](coding.md) §9） |
 | Concepts（C++20） | 0（模板驱动 +28 B） | ✅ | ✅ | ✅ | ✅ | ✅ | C++17 用 `static_assert` + trait 回退 |
 | CRTP | +28 B（同模板） | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ | 只在静态多态类型间共享实现；C++20 优先 Concept + 自由函数 |
 | `virtual`（受保护非虚析构 + `final`） | +88 B；调用点与 C 函数表相同 | ⚠️ | ✅ | ✅ | ✅ | ⚠️ | 仅运行期选择的边界 |

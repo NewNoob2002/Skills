@@ -1,0 +1,10 @@
+{
+  "skills": {
+    "embedded-engineering": {
+      "max_skill_md_lines": 150,
+      "external_paths": [
+        "scripts/ci/check_compliance.py"
+      ]
+    }
+  }
+}

@@ -39,6 +39,8 @@ description: >-
 
 **规则优先级**（高 → 低）：运行时/授权限制 → 项目显式规则（`AGENTS.md`、`CLAUDE.md`、既有 `.clang-format`、MISRA 偏离记录）→ 目标生态官方规范（Zephyr/Linux，**向上游提交时强制**）→ BARR-C → 分层架构规则 → 本工作流默认值。冲突的详细裁决见 [profiles.md](references/profiles.md)。
 
+**项目常驻规则**：目标仓库没有 `AGENTS.md` 时，可按 `assets/AGENTS.md.template` 起草（芯片、SDK、命令、硬件授权范围只写已核实的事实，未知写 `UNKNOWN`），经用户确认后再放入仓库。
+
 ## 2. 选择角色与评审深度
 
 基于 brunofbloq/embedded-agent-skills 的“架构 / 实现 / 验证分离”工作流，详细步骤见 [workflows/workflow.md](references/workflows/workflow.md)。
