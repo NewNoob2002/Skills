@@ -1228,8 +1228,10 @@ def main(argv: list[str] | None = None) -> int:
     docs = [p.resolve() for p in (args.doc or [])]
     if not skills:
         skills = sorted(p.parent.resolve() for p in (REPO / "skills").glob("*/SKILL.md"))
-        if args.doc is None and (REPO / "README.md").is_file():
-            docs = [REPO / "README.md"]
+        if args.doc is None:
+            # 仓库文档：README 与 docs/、research/ 下的 Markdown（生成的结果文件不在其中）
+            docs = [p for p in [REPO / "README.md"] if p.is_file()]
+            docs += sorted((REPO / "docs").glob("*.md")) + sorted((REPO / "research").glob("*.md"))
     if not skills:
         print("error: no skill directories found", file=sys.stderr)
         return 2

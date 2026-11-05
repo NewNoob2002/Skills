@@ -7,9 +7,11 @@ description: >-
   HAL wrappers, devicetree/Kconfig, kernel modules, or embedded C/C++ modules; when asked for BARR-C,
   MISRA-style checks, C++ feature trade-offs (RAII, templates, virtual, constexpr, heap, exceptions),
   ETL/Pigweed/modm usage, Flash/RAM cost evaluation, Ceedling/CppUTest host tests, ztest/Twister,
-  KUnit, checkpatch, or layered firmware architecture.
+  KUnit, checkpatch, or layered firmware architecture; also HardFault/trap and fault-register analysis,
+  bootloader/OTA/firmware update and power-loss safety, state machines and protocol parsing, ThreadX, RISC-V.
   嵌入式 C/C++ 开发工作流与规范基线：MCU 裸机/RTOS、Zephyr、嵌入式 Linux 驱动与用户态；架构评审、
-  编码、代码审查、BARR-C 与现代 C++ 规范、Ceedling/CppUTest 单元测试、ISR/驱动/RTOS 设计、开销评估。
+  编码、代码审查、BARR-C 与现代 C++ 规范、Ceedling/CppUTest 单元测试、ISR/驱动/RTOS 设计、开销评估、
+  HardFault 排查、bootloader/OTA 升级、状态机与协议解析。
 ---
 
 # Embedded Engineering Baseline

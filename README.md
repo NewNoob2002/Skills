@@ -83,6 +83,11 @@ tools/install_eval_tools.sh     # 验证工程所需的用户级工具（west、
 evals/projects/<name>/          # 四类验证工程：good/ 已知良好样例、variants/ 故意引入问题的变体、eval.yaml 预期
 evals/RESULTS.md                # run_evals 生成的结果（不要手改）
 evals/TRIAGE.md                 # 首次运行时预期与结果不一致的分诊记录
+evals/agent/                    # Agent 行为评测：cases.yaml 用例、RESULTS*.md 结果（runs/ 原始记录不入库）
+tools/run_agent_evals.py        # 在沙箱仓库中运行 Claude Code / Codex 并判定
+docs/design.md                  # 设计、实施与测试策略
+docs/validation-report.md       # 验证报告（汇总各层实际运行结果）
+research/                       # 来源矩阵与规范冲突分析
 ```
 
 ## 安装
@@ -115,8 +120,8 @@ evals/TRIAGE.md                 # 首次运行时预期与结果不一致的分�
 
 | 项 | 结果 |
 | --- | --- |
-| `python3 tools/validate_skill.py`（技能 13 项 + README 3 项检查） | PASS |
-| `python3 -m unittest discover -s tests -v`（202 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试、clang-tidy 检查名有效性、run_evals 语义；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 后无跳过） | PASS |
+| `python3 tools/validate_skill.py`（技能 13 项 + README、docs/、research/ 各文档 3 项检查，共 28 项） | PASS |
+| `python3 -m unittest discover -s tests -v`（217 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试、clang-tidy 检查名有效性、run_evals 语义；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 后无跳过） | PASS |
 | `python3 tools/run_evals.py --strict`：4 个验证工程、32 个变体（4 个良好样例 + 28 个故意引入问题的变体），结果见 `evals/RESULTS.md` | PASS：32 MATCH，0 MISMATCH，0 NOT_RUN；4 个已知漏报（review 规则）均已登记 |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |
@@ -139,6 +144,7 @@ evals/TRIAGE.md                 # 首次运行时预期与结果不一致的分�
 | Zephyr v4.5.0：Twister（`native_sim/native/64`，无需 SDK）、树内 checkpatch 与 `.clang-format` | PASS：`zephyr-app` 的 6 个变体 |
 | Zephyr `check_compliance.py` 整体、Linux 内核（checkpatch、KUnit、`dt_binding_check`） | NOT_RUN：前者需要 Zephyr 树内的提交区间；本机没有 Linux 内核源码树 |
 | Renode 1.17、QEMU 上的目标仿真 | NOT_RUN：工具已安装，尚无基于它们的验证用例 |
+| `python3 tools/run_agent_evals.py`：25 个用例 × Claude Code / Codex，评委为 omp + Gemini 4 Argon | Claude 20/25、Codex 21/25 PASS；失败项逐条复核见 `docs/validation-report.md` §4 |
 | C++ 在目标板上的执行时间、栈水位、ISR 时延 | NOT_RUN：没有目标板；方法见 `references/verification/cpp-testing.md` §6–§7 |
 | 非 GCC 工具链（Clang 裸机、IAR、ARM Compiler 6）上的 C++ 模板与开销 | NOT_RUN：本机无对应工具链/sysroot |
 

@@ -7,8 +7,8 @@
 | 来源 | 版本 / 提交 | 许可 | 本技能采用的部分 | 有意不采用的部分 | 本项目验证过的事实 | 维护风险 |
 | --- | --- | --- | --- | --- | --- | --- |
 | brunofbloq/embedded-agent-skills | 未锁定提交 | 未声明 | Architect / Developer / QA 分工、两阶段架构门、证据级别、任务契约（`workflows/workflow.md`） | 原文（无许可证，只借鉴结构，独立改写） | — | 无许可证意味着不能复制文本；结构思想不受影响 |
-| rovinax/embedded-skills | 未锁定提交 | MIT | 分层架构、驱动设计、ISR 与 RTOS 规则（`architecture/mcu-architecture.md`、`rtos/mcu-isr-rtos.md`） | 固定的 ISR 时间表、W1C 寄存器 `\|=` 写法、优先级 0 调用 `FromISR` 等错误做法 | 原文存在 6 处与芯片手册、FreeRTOS 约束或 BARR-C 不符的地方，修订表见 `mcu-isr-rtos.md` §7 与 `mcu-architecture.md` §8 | 社区规则不可直接当权威；每条都需对照手册 |
-| BARR-C:2018 标准 | 2018 版 | 免费发布 | 规则编号与意译要点（`c/barr-c.md`） | 原文复制 | 勘误 4 条已记录（`barr-c.md` §5） | 2026 版发布后需整体替换 |
+| rovinax/embedded-skills | 未锁定提交 | MIT | 分层架构、驱动设计、ISR 与 RTOS 规则（`architecture/mcu-architecture.md`、`rtos/mcu-isr-rtos.md`） | 固定的 ISR 时间表、W1C 寄存器 `\|=` 写法、优先级 0 调用 `FromISR` 等错误做法 | 原文存在 6 处与芯片手册、FreeRTOS 约束或 BARR-C 不符的地方，修订表见 `../skills/embedded-engineering/references/rtos/mcu-isr-rtos.md` §7 与 `../skills/embedded-engineering/references/architecture/mcu-architecture.md` §8 | 社区规则不可直接当权威；每条都需对照手册 |
+| BARR-C:2018 标准 | 2018 版 | 免费发布 | 规则编号与意译要点（`c/barr-c.md`） | 原文复制 | 勘误 4 条已记录（`../skills/embedded-engineering/references/c/barr-c.md` §5） | 2026 版发布后需整体替换 |
 | netrinomike/barr-c（Barr Group 官方 enforcement kit） | `2018/`，commit `75bcc16` | MIT | `.clang-format`、`.clang-tidy`、`check.sh`、告警门禁 | — | **clang-tidy 23 静默忽略其中的 `hicpp-signed-bitwise`**，BARR-C 5.3.b 因此失效（`evals/TRIAGE.md` #2）；已本地补 `bugprone-signed-bitwise`，并加入检查名有效性的回归测试 | 工具链升级会让“原样”配置悄悄失效；需要 `ClangTidyConfigTest` 持续守护 |
 | Ceedling | 1.2.2（gem） | MIT | 1.x 配置、命令、CMock 插件（`verification/ceedling.md`、`assets/ceedling/project.yml`） | — | 1.2.2 对 `:paths:` 中不存在的目录报配置错误（TRIAGE #1）；只用 `:include` 作为头文件路径（TRIAGE #3） | 0.31 → 1.x 有破坏性变更；版本需锁定 |
 | CppUTest | v4.0（源码构建） | BSD 风格 | CppUTest / CppUMock 用法、CMake 目标名 | — | v4.0 需要 `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` 才能用 CMake ≥ 4 构建；模板与验证工程均已在其上运行 | 发布节奏慢，master 与 v4.0 的目标名不同 |

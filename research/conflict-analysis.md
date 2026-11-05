@@ -1,6 +1,6 @@
 # 规范冲突分析
 
-各来源之间的规则互相冲突。本技能不试图“统一”它们，而是先判定 profile，再按 profile 选用规则；跨 profile 的冲突在 `standards/rules.yaml` 中以 `conflicts` 双向登记，由 `tools/validate_skill.py` 检查对称性。逐项的裁决矩阵在 `skills/embedded-engineering/references/profiles.md` §3（随技能安装）。
+各来源之间的规则互相冲突。本技能不试图“统一”它们，而是先判定 profile，再按 profile 选用规则；跨 profile 的冲突在 `standards/rules.yaml` 中以 `conflicts` 双向登记，由 `tools/validate_skill.py` 检查对称性。逐项的裁决矩阵在 `../skills/embedded-engineering/references/profiles.md` §3（随技能安装）。
 
 ## 1. 裁决原则
 
