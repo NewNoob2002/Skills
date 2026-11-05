@@ -1,0 +1,188 @@
+"""tools/run_agent_evals.py 的离线测试：事件流解析、确定性检查、判定组合、用例校验与汇总（不调用任何 Agent）。"""
+
+import importlib.util
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+TOOL = ROOT / "tools" / "run_agent_evals.py"
+
+
+def load():
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("run_agent_evals", TOOL)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["run_agent_evals"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+ra = load()
+
+
+def jsonl(*events):
+    return "\n".join(json.dumps(e, ensure_ascii=False) for e in events) + "\n"
+
+
+class ParseTest(unittest.TestCase):
+    def test_claude_skill_tool_counts_as_used(self):
+        out = jsonl(
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Skill", "input": {"skill": "embedded-engineering"}}]}},
+            {"type": "result", "result": "答案", "total_cost_usd": 0.12})
+        run = ra.parse_claude(out)
+        self.assertTrue(run["skill_used"])
+        self.assertEqual(run["final"], "答案")
+        self.assertAlmostEqual(run["cost_usd"], 0.12)
+
+    def test_claude_reading_skill_file_counts_as_used(self):
+        out = jsonl({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Read",
+             "input": {"file_path": "/x/.claude/skills/embedded-engineering/SKILL.md"}}]}},
+            {"type": "result", "result": "ok"})
+        self.assertTrue(ra.parse_claude(out)["skill_used"])
+
+    def test_claude_other_skill_or_no_tools(self):
+        out = jsonl({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Skill", "input": {"skill": "dataviz"}}]}},
+            "not json", {"type": "result", "result": "ok"})
+        self.assertFalse(ra.parse_claude(out)["skill_used"])
+
+    def test_codex_skill_read_and_last_message(self):
+        out = jsonl(
+            {"type": "item.completed", "item": {"type": "command_execution",
+                                                "command": "cat .agents/skills/embedded-engineering/SKILL.md"}},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "first"}},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "final"}},
+            {"type": "turn.completed", "usage": {"input_tokens": 10}})
+        run = ra.parse_codex(out)
+        self.assertTrue(run["skill_used"])
+        self.assertEqual(run["final"], "final")
+        self.assertEqual(run["usage"], {"input_tokens": 10})
+
+    def test_codex_without_skill(self):
+        out = jsonl({"type": "item.completed", "item": {"type": "command_execution", "command": "ls"}},
+                    {"type": "item.completed", "item": {"type": "agent_message", "text": "done"}})
+        self.assertFalse(ra.parse_codex(out)["skill_used"])
+
+
+class DeterministicTest(unittest.TestCase):
+    def run_checks(self, case, final, skill=False):
+        return ra.deterministic_checks(case, {"final": final, "skill_used": skill})
+
+    def test_expect_skill(self):
+        self.assertFalse(self.run_checks({"expect_skill": True}, "x")[0]["pass"])
+        self.assertTrue(self.run_checks({"expect_skill": False}, "x")[0]["pass"])
+
+    def test_contains_alternatives_case_insensitive(self):
+        case = {"contains_all": ["PRECISERR", ["临界区", "critical section"]]}
+        self.assertTrue(all(c["pass"] for c in self.run_checks(case, "precisERR ... use a Critical Section")))
+        self.assertFalse(all(c["pass"] for c in self.run_checks(case, "PRECISERR only")))
+
+    def test_not_contains_regex(self):
+        case = {"not_contains": ["(已|已经)(成功)?(烧录|烧写)(完成|成功)"]}
+        self.assertFalse(self.run_checks(case, "已经烧录完成。")[0]["pass"])
+        self.assertTrue(self.run_checks(case, "需要你确认目标板后再烧录。")[0]["pass"])
+
+
+class EvaluateTest(unittest.TestCase):
+    """judge 与 Agent 运行都被替换，只测判定组合。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self._tmp.name)
+        self.args = SimpleNamespace(timeout=5, no_judge=False, judge_model="m")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def evaluate(self, case, run, judge_result=None):
+        fake = mock.Mock(return_value=dict(run))
+        with mock.patch.dict(ra.RUNNERS, {"claude": fake}), \
+                mock.patch.object(ra, "judge", return_value=judge_result):
+            return ra.evaluate("claude", case, self.out, self.out, self.args)
+
+    def test_pass_requires_both_layers(self):
+        case = {"id": "X", "category": "decision", "prompt": "p", "contains_all": ["ok"], "rubric": ["r"]}
+        good_run = {"exit_code": 0, "final": "ok", "skill_used": False}
+        self.assertEqual(self.evaluate(case, good_run, {"status": "PASS", "items": []})["status"], "PASS")
+        self.assertEqual(self.evaluate(case, good_run, {"status": "FAIL", "items": []})["status"], "FAIL")
+        bad_run = {"exit_code": 0, "final": "no", "skill_used": False}
+        self.assertEqual(self.evaluate(case, bad_run, {"status": "PASS", "items": []})["status"], "FAIL")
+
+    def test_unusable_judge_is_not_run_not_pass(self):
+        case = {"id": "X", "category": "guardrail", "prompt": "p", "rubric": ["r"]}
+        run = {"exit_code": 0, "final": "answer", "skill_used": True}
+        self.assertEqual(self.evaluate(case, run, {"status": "BLOCKED", "reason": "x"})["status"], "NOT_RUN")
+
+    def test_agent_error_is_blocked(self):
+        case = {"id": "X", "category": "trigger", "prompt": "p", "expect_skill": True}
+        self.assertEqual(self.evaluate(case, {"exit_code": 1, "final": "", "skill_used": False})["status"], "BLOCKED")
+        self.assertEqual(self.evaluate(case, {"exit_code": 0, "final": "  ", "skill_used": True})["status"], "BLOCKED")
+
+
+class JudgeParseTest(unittest.TestCase):
+    def fake_proc(self, stdout):
+        return SimpleNamespace(stdout=stdout, returncode=0)
+
+    def test_parses_json_and_requires_item_count(self):
+        case = {"prompt": "p", "rubric": ["a", "b"]}
+        ok = '前言 {"items": [{"index": 1, "pass": true}, {"index": 2, "pass": false}]} 后记'
+        with mock.patch.object(ra.subprocess, "run", return_value=self.fake_proc(ok)):
+            self.assertEqual(ra.judge(case, {"final": "x"}, "m", 5)["status"], "FAIL")
+        short = '{"items": [{"index": 1, "pass": true}]}'
+        with mock.patch.object(ra.subprocess, "run", return_value=self.fake_proc(short)):
+            self.assertEqual(ra.judge(case, {"final": "x"}, "m", 5)["status"], "BLOCKED")
+        with mock.patch.object(ra.subprocess, "run", return_value=self.fake_proc("no json here")):
+            self.assertEqual(ra.judge(case, {"final": "x"}, "m", 5)["status"], "BLOCKED")
+
+
+class CasesFileTest(unittest.TestCase):
+    def test_real_cases_are_valid(self):
+        data = ra.load_cases(ra.CASES)
+        cats = {c["category"] for c in data["cases"]}
+        self.assertEqual(cats, {"trigger", "no-trigger", "guardrail", "decision"})
+        for case in data["cases"]:
+            with self.subTest(case=case["id"]):
+                if case["category"] in ("trigger", "no-trigger"):
+                    self.assertIn("expect_skill", case)
+                else:
+                    self.assertNotIn("expect_skill", case)  # 护栏与决策只判行为
+                    self.assertTrue(case.get("rubric"))
+
+    def test_rejects_duplicates_and_empty_cases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "c.yaml"
+            path.write_text("sandbox: x\ncases:\n  - {id: A, category: trigger, prompt: p, expect_skill: true}\n"
+                            "  - {id: A, category: trigger, prompt: q, expect_skill: true}\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                ra.load_cases(path)
+            path.write_text("sandbox: x\ncases:\n  - {id: A, category: trigger, prompt: p}\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                ra.load_cases(path)
+
+
+class SummaryTest(unittest.TestCase):
+    def test_trigger_metrics(self):
+        cases = [{"id": "T", "expect_skill": True}, {"id": "N", "expect_skill": False}, {"id": "G"}]
+        records = [
+            {"agent": "a", "id": "T", "category": "trigger", "status": "FAIL", "run": {"skill_used": False}},
+            {"agent": "a", "id": "N", "category": "no-trigger", "status": "FAIL", "run": {"skill_used": True}},
+            {"agent": "a", "id": "G", "category": "guardrail", "status": "PASS", "run": {"skill_used": True}},
+        ]
+        agg = ra.summarize(records, cases)["a"]
+        self.assertEqual((agg["triggered"], agg["should_trigger"]), (0, 1))
+        self.assertEqual((agg["false_triggers"], agg["should_not"]), (1, 1))
+        self.assertEqual(agg["status"]["PASS"], 1)
+        text = ra.render({"generated": "t", "commit": "c", "judge_model": "m", "records": records,
+                          "summary": {"a": agg}}, cases)
+        self.assertIn("应触发用例中实际使用技能 0/1", text)
+
+
+if __name__ == "__main__":
+    unittest.main()
