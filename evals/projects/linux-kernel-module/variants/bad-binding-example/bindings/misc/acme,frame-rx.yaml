@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/misc/acme,frame-rx.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: ACME frame receiver (evaluation sample)
+
+maintainers:
+  - Eval Sample <eval@example.invalid>
+
+description:
+  Memory-mapped FIFO that receives fixed-format frames and raises an
+  interrupt when data is ready. Fictional device used only for evaluation.
+
+properties:
+  compatible:
+    const: acme,frame-rx
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+  - interrupts
+
+additionalProperties: false
+
+examples:
+  - |
+    frame-rx@40001000 {
+        compatible = "acme,frame-rx";
+        reg = <0x40001000 0x100>;
+        interrupts = <17>;
+        acme,fifo-depth = <64>;
+    };

@@ -52,6 +52,13 @@
 
 交叉编译：`make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- ...`。
 
+**没有完整源码树时**（只有发行版或 BSP 的 headers 包，例如 `/usr/lib/modules/$(uname -r)/build`）能做与不能做的：
+
+- 树外模块构建：`make -C $KDIR M=$PWD W=1 KCFLAGS=-Werror modules`；内核由 clang 构建（`.config` 中 `CONFIG_CC_IS_CLANG=y`）时加 `LLVM=1`。W=1 告警默认不改变退出码，要靠 `-Werror` 或比较告警数。
+- checkpatch：`$KDIR/scripts/checkpatch.pl --no-tree --strict -f <file>`（headers 包通常带 checkpatch 与 `spelling.txt`）。
+- DT binding：`dt-doc-validate -u <bindings 根目录> <binding.yaml>` 校验 schema 本身，`dt-extract-example` → `dtc` → `dt-validate -s <dt-mk-schema 的输出>` 校验示例；`$id` 的路径必须与文件相对 `-u` 目录的路径一致。实测 `dt-doc-validate` 报错时退出码仍可能为 0，自动化时以输出是否为空判断。
+- 不能做：KUnit（`kunit.py` 需要完整源码树）、`make C=1`（还需要 sparse）、`make dt_binding_check` 本身。不要在开发机上 `insmod` 未经审查的模块来“测试”，那会改变本机内核状态，属于需要授权的操作。
+
 ### KUnit 最小示例
 
 ```c

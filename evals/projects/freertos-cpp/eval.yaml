@@ -11,9 +11,9 @@ checks:
     blocked_codes: [2]
     rules: [ARCH-001, ARCH-002, ARCH-003, ARCH-004, ARCH-005, ARCH-006]
   format:
+    # 规则体系里没有 C++ 排版规则（CFMT-* 只覆盖 C），clang-format 结果不对应规则 ID
     run: "make -s format STYLE={skill}/assets/cpp/.clang-format"
     requires: [clang-format, make]
-    rules: [CPP-015]
   cross_build:
     run: "make -s cross"
     requires: [arm-none-eabi-g++, make]
@@ -25,7 +25,7 @@ checks:
     rules: [CPP-001, CPP-002, CPP-003, CPP-004, CPP-005, CPP-006, CPP-007, CPP-008, CPP-009, CPP-011]
   unit:
     run: "make -s unit CPPUTEST={cpputest}"
-    requires: [g++, make, "{cpputest}/lib/libCppUTest.a"]
+    requires: [g++, make, "{cpputest}/lib/libCppUTest.a", "{cpputest}/lib/libCppUTestExt.a"]
     rules: [TEST-006]
   rtos_host:
     run: "make -s rtos FREERTOS={freertos}"
@@ -36,7 +36,7 @@ variants:
   good: {}
   bad-std-function:
     violates: [CPP-004]
-    note: "DebugSink 内部用 std::function 保存回调：T0 下 cpp_cost 检出堆、throw 辅助与静态析构"
+    note: "DebugSink 内部用 std::function 保存回调：this 捕获是 location-invariant 且小于 libstdc++ 的 SBO 缓冲，ELF 中没有 operator new；cpp_cost 实际命中 throw_helpers（std::__throw_bad_function_call，operator() 路径）"
     expect: {cpp_cost: FAIL}
   bad-std-vector:
     violates: [CPP-005]

@@ -120,9 +120,9 @@ research/                       # 来源矩阵与规范冲突分析
 
 | 项 | 结果 |
 | --- | --- |
-| `python3 tools/validate_skill.py`（技能 13 项 + README、docs/、research/ 各文档 3 项检查，共 28 项） | PASS |
-| `python3 -m unittest discover -s tests -v`（217 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试、clang-tidy 检查名有效性、run_evals 语义；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 后无跳过） | PASS |
-| `python3 tools/run_evals.py --strict`：4 个验证工程、32 个变体（4 个良好样例 + 28 个故意引入问题的变体），结果见 `evals/RESULTS.md` | PASS：32 MATCH，0 MISMATCH，0 NOT_RUN；4 个已知漏报（review 规则）均已登记 |
+| `python3 tools/validate_skill.py`（技能 13 项 + README、docs/、research/ 的 6 份文档各 3 项检查，共 31 项） | PASS |
+| `python3 -m unittest discover -s tests -v`（221 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试、clang-tidy 检查名有效性、run_evals 与 run_agent_evals 语义；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 后无跳过） | PASS |
+| `python3 tools/run_evals.py --strict`：5 个验证工程、43 个变体（5 个良好样例 + 38 个故意引入问题的变体），结果见 `evals/RESULTS.md` | PASS：43 MATCH，0 MISMATCH，0 NOT_RUN；5 个已知漏报（review 规则）均已登记 |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |
 | C++ 模板 clang-format（`assets/cpp/.clang-format`）与 clang-tidy（`assets/cpp/.clang-tidy`，含头文件） | PASS |
@@ -142,9 +142,11 @@ research/                       # 来源矩阵与规范冲突分析
 | `ceedling test:all`（Ceedling 1.2.2） | PASS：`mcu-baremetal-c` 与 `linux-userspace`（CMock + ASan/UBSan）。首次运行发现模板默认的 driver 与 tests/support 目录不存在时 Ceedling 报配置错误，已在模板与文档注明 |
 | FreeRTOS V11.3.3 POSIX 移植上的 host 集成测试 | PASS：`freertos-cpp` 的 `rtos_host`，可检出死锁（看门狗任务超时） |
 | Zephyr v4.5.0：Twister（`native_sim/native/64`，无需 SDK）、树内 checkpatch 与 `.clang-format` | PASS：`zephyr-app` 的 6 个变体 |
-| Zephyr `check_compliance.py` 整体、Linux 内核（checkpatch、KUnit、`dt_binding_check`） | NOT_RUN：前者需要 Zephyr 树内的提交区间；本机没有 Linux 内核源码树 |
-| Renode 1.17、QEMU 上的目标仿真 | NOT_RUN：工具已安装，尚无基于它们的验证用例 |
-| `python3 tools/run_agent_evals.py`：25 个用例 × Claude Code / Codex，评委为 omp + Gemini 4 Argon | Claude 20/25、Codex 21/25 PASS；失败项逐条复核见 `docs/validation-report.md` §4 |
+| Linux 内核：树外模块构建（运行内核头文件包）、checkpatch、dtschema binding（`linux-kernel-module`） | PASS：10 个变体；KUnit、`make dt_binding_check`、`make C=1`（sparse）NOT_RUN：本机没有内核源码树，sparse 未安装 |
+| Zephyr `check_compliance.py` 整体 | NOT_RUN：需要 Zephyr 树内的提交区间（已执行其中的 checkpatch 与 clang-format） |
+| QEMU 目标冒烟（`mcu-baremetal-c` 的 `make qemu`，mps2-an386） | PASS：链接并在 QEMU 中运行，可检出向量表入口名错误与行为缺陷（`bad-isr-name`、`bad-toggle-late`） |
+| Renode 1.17 仿真 | NOT_RUN：工具已安装，尚无基于它的验证用例 |
+| `python3 tools/run_agent_evals.py --repeat 3`：25 个用例 × 3 次 × Claude Code / Codex，评委为 omp + DeepSeek V4.1 Flash（原 Gemini 4 Argon 因区域限制不可用） | Claude 61/75（71%–89%）、Codex 63/75（74%–91%）PASS；失败项逐条复核见 `docs/validation-report.md` §4 |
 | C++ 在目标板上的执行时间、栈水位、ISR 时延 | NOT_RUN：没有目标板；方法见 `references/verification/cpp-testing.md` §6–§7 |
 | 非 GCC 工具链（Clang 裸机、IAR、ARM Compiler 6）上的 C++ 模板与开销 | NOT_RUN：本机无对应工具链/sysroot |
 

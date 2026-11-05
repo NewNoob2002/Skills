@@ -19,7 +19,7 @@ skills/embedded-engineering/      唯一的安装单元（install.sh 原样复�
   scripts/                        detect_profile、arch_lint、cpp_cost、BARR-C 门禁、开销基准
   assets/                         BARR-C 与 C++ 的格式/静态分析配置、Ceedling 模板、代码模板、CI 模板
 tools/                            仓库级开发工具（不随技能安装）：validate_skill、run_evals、run_agent_evals、安装脚本
-evals/projects/                   四类验证工程（good + 故意引入问题的变体 + 预期）
+evals/projects/                   五个验证工程（good + 故意引入问题的变体 + 预期）
 evals/agent/                      Agent 行为评测用例
 tests/                            上述脚本与工具的回归测试
 ```
@@ -56,8 +56,8 @@ tests/                            上述脚本与工具的回归测试
 | --- | --- | --- | --- |
 | 技能结构 | `tools/validate_skill.py`（技能 13 项 + 文档 3 项） | frontmatter 合规、引用与章节存在、可达性、规则库与 profile 的结构和一致性、打包卫生 | 内容在语义上正确 |
 | 脚本与工具 | `tests/`（unittest，变异测试为主） | 每个检查能检出对应缺陷；工具声明与实现一致（arch_lint、cpp_cost、detect_profile、clang-tidy 检查名） | 在真实工程上的检出率 |
-| 验证工程 | `tools/run_evals.py` | 在四类真实工程上，良好样例通过、问题变体被预期的检查检出；已知漏报被登记 | 未建模的错误类型；目标板上的时序与电气行为 |
-| Agent 行为 | `tools/run_agent_evals.py` | 技能是否被调用；护栏是否守住；技术决策是否符合规则 | 稳定的通过率（单次运行）；未覆盖的提问方式 |
+| 验证工程 | `tools/run_evals.py` | 在五个真实工程上，良好样例通过、问题变体被预期的检查检出；已知漏报被登记 | 未建模的错误类型；目标板上的时序与电气行为 |
+| Agent 行为 | `tools/run_agent_evals.py` | 技能是否被调用；护栏是否守住；技术决策是否符合规则 | 通过率的稳定性（已做 3 次重复并给 Wilson 区间）；未覆盖的提问方式 |
 | 硬件 | 方法与模板（`verification/cpp-testing.md` §6–§7、`verification/debugging.md`） | — | 本项目没有目标板，全部为 NOT_RUN |
 
 状态语义在所有层一致：PASS / FAIL / NOT_RUN（前提不存在或工具缺失）/ BLOCKED（依赖的检查失败或工具报告配置错误）。NOT_RUN 与 BLOCKED 都不是通过。
@@ -67,10 +67,10 @@ tests/                            上述脚本与工具的回归测试
 | 风险 | 影响 | 缓解 |
 | --- | --- | --- |
 | 工具链升级使第三方配置静默失效 | 规则看似被检查，实际没有（已发生：`hicpp-signed-bitwise`） | `ClangTidyConfigTest`；验证工程在升级后重跑 |
-| 验证工程的预期与样例由同一作者编写 | 预期可能迁就工具行为 | 首次运行的每处不一致都分诊并记录；建议由独立审查者复核 `eval.yaml` |
+| 验证工程的预期与样例由同一作者编写 | 预期可能迁就工具行为 | 首次运行的每处不一致都分诊并记录；已由独立模型复核 `eval.yaml`（`docs/independent-review.md`） |
 | 未对照原文的参考（RISC-V、ThreadX、MCUboot） | Agent 可能引用不准确的细节 | `sources.md` 标明核实状态；规则 `GEN-002` 要求具体芯片以手册为准 |
 | Agent 不调用技能 | 护栏与项目规则在知识型问答中不生效 | 见验证报告的 P5 结果与改进建议 |
-| 只有 13 条 auto 规则被验证工程检验 | 其余 auto 规则的检出能力未经实测 | 规则覆盖统计写入 `evals/RESULTS.md`；后续逐步补变体 |
+| 只有 19 条 auto 规则被验证工程检验（共 44 条） | 其余 auto 规则的检出能力未经实测 | 规则覆盖统计写入 `evals/RESULTS.md`；后续逐步补变体 |
 
 ## 7. 验收标准与完成状态
 
@@ -78,7 +78,7 @@ tests/                            上述脚本与工具的回归测试
 | --- | --- |
 | `validate_skill.py` 0 FAIL | 达成 |
 | `unittest` 全部通过（设置 `ETL_INCLUDE`、`CPPUTEST_PREFIX` 时无跳过） | 达成 |
-| 四类验证工程：良好样例全部 PASS，问题变体全部按预期检出，已知漏报全部登记 | 达成（32 MATCH） |
+| 五个验证工程：良好样例全部 PASS，问题变体全部按预期检出，已知漏报全部登记 | 达成（43 MATCH） |
 | 所有 `coverage: full` 的规则至少被一个变体检验 | 达成（4/4） |
 | Agent 行为评测有真实的运行记录 | 见验证报告 |
 | 未执行的验证标记为 NOT_RUN 并说明原因 | 达成（README 验证状态表、验证报告） |

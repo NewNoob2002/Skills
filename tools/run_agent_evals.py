@@ -2,12 +2,18 @@
 """Agent 行为评测：在装有技能的沙箱仓库中运行 Claude Code / Codex，按 evals/agent/cases.yaml 判定。
 
 用法：
-  python3 tools/run_agent_evals.py [--agents claude,codex] [--cases T01,G01] [--jobs 3]
+  python3 tools/run_agent_evals.py [--agents claude,codex] [--cases T01,G01] [--jobs 3] [--repeat N]
                                    [--judge-model MODEL] [--no-judge] [--report FILE]
 
 判定分两层：
   确定性检查   技能是否被读取/调用（expect_skill）、回答必须包含的内容、不得出现的说法
   评委检查     rubric 逐条交给独立评委模型（默认 omp 的 Gemini 4 Argon，与两个被测 Agent 不同厂商）
+
+--repeat N 让每个用例每个 Agent 运行 N 次（互相独立），报告给出每个用例的通过次数与总体通过率的
+Wilson 95% 区间。用例可写 setup（shell 命令），在该用例独享的沙箱副本中、提交前执行（例如生成构建产物）。
+--rejudge RUN_DIR 对已有运行重新评审，不重跑 Agent：默认只处理评委无可用结论（BLOCKED）的记录；
+--rejudge-all 则用 --judge-model 重评全部有 rubric 的记录（原结论保存在 judge_prev，用于比较评委一致性）。
+结果写回该目录的 summary.json。
 
 用例状态：PASS / FAIL / NOT_RUN（Agent CLI 不可用，或确定性检查通过但评委未运行）/ BLOCKED（Agent 运行出错或超时）。
 被测 Agent 只读：Claude Code 禁用 Bash/Edit/Write 等工具并只加载项目级设置、不加载 MCP；Codex 使用 read-only 沙箱。
@@ -39,7 +45,7 @@ SKILL_NAME = "embedded-engineering"
 DEFAULT_JUDGE = "magpie/antigravity/gemini-4-argon"
 PASS, FAIL, NOT_RUN, BLOCKED = "PASS", "FAIL", "NOT_RUN", "BLOCKED"
 CLAUDE_DENIED = "Bash Edit Write NotebookEdit WebFetch WebSearch"
-CASE_KEYS = {"id", "category", "prompt", "expect_skill", "contains_all", "not_contains", "rubric"}
+CASE_KEYS = {"id", "category", "prompt", "setup", "expect_skill", "contains_all", "not_contains", "rubric"}
 
 
 # --------------------------------------------------------------------------- 用例
@@ -62,10 +68,16 @@ def load_cases(path: Path) -> dict:
 
 # --------------------------------------------------------------------------- 沙箱
 
-def make_sandbox(agent: str, sandbox_project: str, root: Path) -> Path:
-    """复制验证工程的 good/ 为 git 仓库，并用 install.sh 安装技能（与用户实际安装方式一致）。"""
-    repo = root / f"repo-{agent}"
+def make_sandbox(agent: str, sandbox_project: str, root: Path, setup: str | None = None,
+                 name: str = "") -> Path:
+    """复制验证工程的 good/ 为 git 仓库，并用 install.sh 安装技能（与用户实际安装方式一致）。
+
+    setup 在提交前于沙箱中执行；失败时抛出 CalledProcessError，由调用者记为 BLOCKED。"""
+    repo = root / (f"repo-{agent}-{name}" if name else f"repo-{agent}")
     shutil.copytree(REPO / "evals" / "projects" / sandbox_project / "good", repo)
+    if setup:
+        subprocess.run(["/bin/sh", "-c", setup], cwd=repo, check=True, capture_output=True, text=True,
+                       timeout=300)
     git = ["git", "-C", str(repo), "-c", "user.email=eval@example.invalid", "-c", "user.name=eval"]
     subprocess.run(git[:3] + ["init", "-q"], check=True)
     subprocess.run(git + ["add", "-A"], check=True)
@@ -204,17 +216,45 @@ def judge(case: dict, run: dict, model: str, timeout: int) -> dict:
     return {"status": PASS if all(bool(i.get("pass")) for i in items) else FAIL, "items": items}
 
 
-def evaluate(agent: str, case: dict, repo: Path, outdir: Path, args) -> dict:
-    raw = outdir / agent / f"{case['id']}.jsonl"
+def combine(det_ok: bool, jstat: str) -> str:
+    if not det_ok or jstat == FAIL:
+        return FAIL
+    if jstat == PASS:
+        return PASS
+    return NOT_RUN  # 确定性检查通过，但评委没有给出可用结论
+
+
+def rejudge(report: dict, cases: dict, model: str, timeout: int, jobs: int, everything: bool = False) -> int:
+    """重新评审；返回重新评审的条数。everything 为 True 时重评全部有 rubric 的记录并保留原结论。"""
+    todo = [r for r in report["records"] if r.get("judge") and r["id"] in cases and r.get("run")
+            and (everything or r["judge"].get("status") == BLOCKED)]
+
+    def one(rec: dict) -> None:
+        if everything:
+            rec["judge_prev"] = {**rec["judge"], "model": report.get("judge_model")}
+        rec["judge"] = judge(cases[rec["id"]], rec["run"], model, timeout)
+        rec["status"] = combine(all(c["pass"] for c in rec.get("checks", [])), rec["judge"]["status"])
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        list(pool.map(one, todo))
+    if everything:
+        report["judge_model_prev"] = report.get("judge_model")
+        report["judge_model"] = model
+    report["judged"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    return len(todo)
+
+
+def evaluate(agent: str, case: dict, repo: Path, outdir: Path, args, rep: int = 1) -> dict:
+    raw = outdir / agent / (f"{case['id']}.jsonl" if rep == 1 else f"{case['id']}-r{rep}.jsonl")
     raw.parent.mkdir(parents=True, exist_ok=True)
     start = time.monotonic()
     try:
         run = RUNNERS[agent](case["prompt"], repo, raw, args.timeout)
     except subprocess.TimeoutExpired:
-        return {"agent": agent, "id": case["id"], "category": case["category"], "status": BLOCKED,
+        return {"agent": agent, "id": case["id"], "category": case["category"], "rep": rep, "status": BLOCKED,
                 "reason": f"agent timeout after {args.timeout} s"}
     run["seconds"] = round(time.monotonic() - start, 1)
-    record = {"agent": agent, "id": case["id"], "category": case["category"], "run": run}
+    record = {"agent": agent, "id": case["id"], "category": case["category"], "rep": rep, "run": run}
     if run["exit_code"] != 0 or not run["final"].strip():
         record.update(status=BLOCKED, reason=f"agent exit {run['exit_code']} or empty answer")
         return record
@@ -226,19 +266,23 @@ def evaluate(agent: str, case: dict, repo: Path, outdir: Path, args) -> dict:
             record["judge"] = {"status": NOT_RUN, "reason": "--no-judge"}
         else:
             record["judge"] = judge(case, run, args.judge_model, args.timeout)
-        jstat = record["judge"]["status"]
-        if not det_ok or jstat == FAIL:
-            record["status"] = FAIL
-        elif jstat == PASS:
-            record["status"] = PASS
-        else:
-            record["status"] = NOT_RUN  # 确定性检查通过，但评委没有给出可用结论
+        record["status"] = combine(det_ok, record["judge"]["status"])
     else:
         record["status"] = PASS if det_ok else FAIL
     return record
 
 
 # --------------------------------------------------------------------------- 汇总
+
+def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """二项比例的 Wilson 区间（n 较小时比正态近似可靠）。"""
+    if n == 0:
+        return (0.0, 1.0)
+    p = k / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / (1 + z * z / n)
+    return (max(0.0, centre - half), min(1.0, centre + half))
+
 
 def summarize(records: list[dict], cases: list[dict]) -> dict:
     by_agent: dict[str, dict] = {}
@@ -263,37 +307,61 @@ def summarize(records: list[dict], cases: list[dict]) -> dict:
     return by_agent
 
 
+def failed_checks(rec: dict) -> list[str]:
+    failed = [f"{c['check']}: {c['detail']}" for c in rec.get("checks", []) if not c["pass"]]
+    jd = rec.get("judge") or {}
+    for item in jd.get("items", []) or []:
+        if not item.get("pass"):
+            failed.append(f"rubric {item.get('index')}: {str(item.get('reason', ''))[:80]}")
+    if jd.get("status") in (NOT_RUN, BLOCKED):
+        failed.append(f"judge {jd['status']}: {jd.get('reason', '')}")
+    if rec.get("reason"):
+        failed.append(rec["reason"])
+    return failed
+
+
 def render(report: dict, cases: list[dict]) -> str:
+    repeat = report.get("repeat", 1)
+    note = ("每个用例每个 Agent 只运行一次；Agent 输出有随机性，单次结果不代表稳定通过率。" if repeat == 1 else
+            f"每个用例每个 Agent 独立运行 {repeat} 次；“结果”列为通过次数，区间为 Wilson 95% 区间。")
+    judged = f"；重评：{report['judged']}" if report.get("judged") else ""
     lines = ["# Agent 行为评测结果", "",
-             f"生成时间：{report['generated']}；技能提交：`{report['commit']}`；评委：`{report['judge_model']}`。"
-             "本文件由 `tools/run_agent_evals.py` 生成，不要手改。", "",
-             "每个用例每个 Agent 只运行一次；Agent 输出有随机性，单次结果不代表稳定通过率。", ""]
+             f"生成时间：{report['generated']}；技能提交：`{report['commit']}`；评委：`{report['judge_model']}`"
+             f"{judged}。本文件由 `tools/run_agent_evals.py` 生成，不要手改。", "", note, ""]
     for agent, agg in report["summary"].items():
         s = agg["status"]
         recall = f"{agg['triggered']}/{agg['should_trigger']}" if agg["should_trigger"] else "—"
         false_rate = f"{agg['false_triggers']}/{agg['should_not']}" if agg["should_not"] else "—"
+        total = sum(s.values())
+        lo, hi = wilson(s[PASS], total)
         lines += [f"## {agent}", "",
-                  f"PASS {s[PASS]}，FAIL {s[FAIL]}，NOT_RUN {s[NOT_RUN]}，BLOCKED {s[BLOCKED]}；"
-                  f"应触发用例中实际使用技能 {recall}，不应触发用例中误用技能 {false_rate}"
+                  f"PASS {s[PASS]}，FAIL {s[FAIL]}，NOT_RUN {s[NOT_RUN]}，BLOCKED {s[BLOCKED]}"
+                  + (f"（通过率 {s[PASS]}/{total}，95% 区间 {lo:.0%}–{hi:.0%}）" if repeat > 1 else "")
+                  + f"；应触发用例中实际使用技能 {recall}，不应触发用例中误用技能 {false_rate}"
                   + (f"；花费约 ${agg['cost_usd']:.2f}" if agg["cost_usd"] else "") + "。", "",
                   "| 类别 | PASS | FAIL | NOT_RUN | BLOCKED |", "| --- | --- | --- | --- | --- |"]
         for cat, c in sorted(agg["by_category"].items()):
             lines.append(f"| {cat} | {c[PASS]} | {c[FAIL]} | {c[NOT_RUN]} | {c[BLOCKED]} |")
         lines += ["", "| 用例 | 类别 | 结果 | 使用技能 | 未通过的检查 |", "| --- | --- | --- | --- | --- |"]
-        for rec in [r for r in report["records"] if r["agent"] == agent]:
-            run = rec.get("run") or {}
-            failed = [f"{c['check']}: {c['detail']}" for c in rec.get("checks", []) if not c["pass"]]
-            jd = rec.get("judge") or {}
-            for item in jd.get("items", []) or []:
-                if not item.get("pass"):
-                    failed.append(f"rubric {item.get('index')}: {str(item.get('reason', ''))[:80]}")
-            if jd.get("status") in (NOT_RUN, BLOCKED):
-                failed.append(f"judge {jd['status']}: {jd.get('reason', '')}")
-            if rec.get("reason"):
-                failed.append(rec["reason"])
-            cell = "；".join(failed).replace("|", "\\|") or "—"
-            used = {True: "是", False: "否"}.get(run.get("skill_used"), "—")
-            lines.append(f"| {rec['id']} | {rec['category']} | {rec['status']} | {used} | {cell} |")
+        mine = [r for r in report["records"] if r["agent"] == agent]
+        for case in cases:
+            recs = sorted((r for r in mine if r["id"] == case["id"]), key=lambda r: r.get("rep", 1))
+            if not recs:
+                continue
+            used_flags = [(r.get("run") or {}).get("skill_used") for r in recs]
+            if repeat == 1:
+                result = recs[0]["status"]
+                used = {True: "是", False: "否"}.get(used_flags[0], "—")
+                failed = failed_checks(recs[0])
+            else:
+                passed = sum(r["status"] == PASS for r in recs)
+                others = sorted({r["status"] for r in recs if r["status"] in (NOT_RUN, BLOCKED)})
+                result = f"{passed}/{len(recs)}" + (f"（另有 {'/'.join(others)}）" if others else "")
+                known = [u for u in used_flags if u is not None]
+                used = f"{sum(map(bool, known))}/{len(known)}" if known else "—"
+                failed = [f"#{r.get('rep', 1)} {f}" for r in recs for f in failed_checks(r)]
+            cell = "；".join(failed).replace("|", "\\|").replace("\n", " ") or "—"
+            lines.append(f"| {case['id']} | {recs[0]['category']} | {result} | {used} | {cell} |")
         lines.append("")
     return "\n".join(lines)
 
@@ -311,11 +379,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--agents", default="claude,codex")
     ap.add_argument("--cases", default="", help="comma-separated case ids (default: all)")
     ap.add_argument("--jobs", type=int, default=3)
+    ap.add_argument("--repeat", type=int, default=1, help="independent runs per case and agent")
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--judge-model", default=DEFAULT_JUDGE)
     ap.add_argument("--no-judge", action="store_true")
     ap.add_argument("--report", type=Path)
+    ap.add_argument("--rejudge", type=Path, metavar="RUN_DIR", help="re-judge an existing run without rerunning agents")
+    ap.add_argument("--rejudge-all", action="store_true", help="with --rejudge: re-judge every rubric record")
     args = ap.parse_args(argv)
+    if args.repeat < 1:
+        print("error: --repeat must be >= 1", file=sys.stderr)
+        return 2
     if yaml is None:
         print("error: PyYAML is required; run: uv run --with pyyaml python3 tools/run_agent_evals.py", file=sys.stderr)
         return 2
@@ -324,6 +398,18 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, KeyError, yaml.YAMLError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    if args.rejudge:
+        summary = args.rejudge / "summary.json"
+        report = json.loads(summary.read_text(encoding="utf-8"))
+        by_id = {c["id"]: c for c in data["cases"]}
+        n = rejudge(report, by_id, args.judge_model, args.timeout, args.jobs, args.rejudge_all)
+        run_cases = [by_id[i] for i in dict.fromkeys(r["id"] for r in report["records"]) if i in by_id]
+        report["summary"] = summarize(report["records"], run_cases)
+        summary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        if args.report:
+            args.report.write_text(render(report, run_cases), encoding="utf-8")
+        print(f"rejudged {n} records; " + "; ".join(f"{a}: {g['status']}" for a, g in report["summary"].items()))
+        return 0
     wanted = {c.strip() for c in args.cases.split(",") if c.strip()}
     cases = [c for c in data["cases"] if not wanted or c["id"] in wanted]
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
@@ -346,18 +432,33 @@ def main(argv: list[str] | None = None) -> int:
                              "reason": f"{agent} CLI not found"} for c in cases]
                 continue
             repos[agent] = make_sandbox(agent, data["sandbox"], Path(tmp))
-        jobs = [(a, c) for a in repos for c in cases]
+        jobs = []
+        for agent in repos:
+            for case in cases:
+                repo = repos[agent]
+                if case.get("setup"):
+                    # 有 setup 的用例独享沙箱，产物不影响其他用例
+                    try:
+                        repo = make_sandbox(agent, data["sandbox"], Path(tmp), case["setup"], case["id"])
+                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                        tail = (getattr(exc, "stderr", "") or "").strip().splitlines()[-1:]
+                        records += [{"agent": agent, "id": case["id"], "category": case["category"], "rep": r,
+                                     "status": BLOCKED, "reason": f"setup failed: {exc} {tail}"}
+                                    for r in range(1, args.repeat + 1)]
+                        continue
+                jobs += [(agent, case, repo, r) for r in range(1, args.repeat + 1)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futures = {pool.submit(evaluate, a, c, repos[a], outdir, args): (a, c) for a, c in jobs}
+            futures = [pool.submit(evaluate, a, c, repo, outdir, args, r) for a, c, repo, r in jobs]
             for fut in concurrent.futures.as_completed(futures):
                 rec = fut.result()
                 records.append(rec)
-                print(f"{rec['agent']}/{rec['id']}: {rec['status']}  skill_used="
+                print(f"{rec['agent']}/{rec['id']}#{rec.get('rep', 1)}: {rec['status']}  skill_used="
                       f"{(rec.get('run') or {}).get('skill_used')}", flush=True)
     order = {c["id"]: i for i, c in enumerate(cases)}
-    records.sort(key=lambda r: (r["agent"], order[r["id"]]))
+    records.sort(key=lambda r: (r["agent"], order[r["id"]], r.get("rep", 1)))
     report = {"generated": time.strftime("%Y-%m-%d %H:%M:%S"), "commit": git_commit(),
-              "judge_model": None if args.no_judge else args.judge_model, "records": records,
+              "judge_model": None if args.no_judge else args.judge_model, "repeat": args.repeat,
+              "records": records,
               "summary": summarize(records, cases)}
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

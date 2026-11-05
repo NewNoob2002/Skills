@@ -5,6 +5,7 @@ project: mcu-baremetal-c
 profile: mcu-baremetal
 summary: "分层的 LED 控制固件：interface + module/ledctl + bsp + platform 向量入口 + app 组合根；Ceedling 测试 ledctl。"
 # project.yml 由 assets/ceedling/project.yml 复制后按本工程目录调整（删去不存在的 driver/ 与 tests/support）
+# barrc 的 clang-tidy 只处理 gen_compdb.py 生成的 .c 条目：传给 check.sh 的 .h 没有编译命令会被跳过，头文件内容不参与该检查。
 setup:
   - copy: ["{skill}/assets/barr-c/.clang-format", ".clang-format"]
   - copy: ["{skill}/assets/barr-c/.clang-tidy", ".clang-tidy"]
@@ -25,6 +26,10 @@ checks:
     run: "make -s cross"
     requires: [arm-none-eabi-gcc, make]
     rules: [C-014]
+  qemu:
+    run: "make -s qemu"
+    requires: [arm-none-eabi-gcc, qemu-system-arm, make, timeout]
+    timeout: 120
   unit:
     run: "ceedling test:all"
     requires: [ceedling]
@@ -38,22 +43,26 @@ variants:
     expect: {arch_lint: FAIL, unit: FAIL}
   bad-hal-call:
     violates: [ARCH-004]
-    note: "module 直接声明并调用 HAL_Delay：分层检查报 hal_call；命名门禁报函数名非小写；host 测试链接不到 HAL_Delay"
-    expect: {arch_lint: FAIL, barrc: FAIL, unit: FAIL}
+    note: "module 直接声明并调用 HAL_Delay：分层检查报 hal_call；.clang-tidy 的 readability-identifier-naming.FunctionCase 报函数名非小写（check.sh 的命名门禁只比对文件名）；host 测试与 QEMU 目标镜像都链接不到 HAL_Delay"
+    expect: {arch_lint: FAIL, barrc: FAIL, qemu: FAIL, unit: FAIL}
   bad-signed-bitwise:
     violates: [C-005]
     expect: {barrc: FAIL}
   bad-implicit-decl:
     violates: [C-014]
     note: "调用未声明的函数：所有编译类检查都失败"
-    expect: {barrc: FAIL, warnings: FAIL, cross_build: FAIL, unit: FAIL}
+    expect: {barrc: FAIL, warnings: FAIL, cross_build: FAIL, qemu: FAIL, unit: FAIL}
   bad-missing-braces:
     violates: [CFMT-002]
     expect: {barrc: FAIL}
   bad-toggle-late:
     defect: "ledctl_tick 用 > 代替 >=，LED 晚一个节拍翻转"
-    expect: {unit: FAIL}
+    expect: {unit: FAIL, qemu: FAIL}
+  bad-isr-name:
+    defect: "SysTick 中断入口名写成 Systick_Handler，与向量表不符，中断落到弱符号默认处理函数"
+    note: "只有链接并在 QEMU 中运行才能发现：host 告警、交叉编译（只编译不链接）与单元测试都通过"
+    expect: {qemu: FAIL}
   bad-isr-heavy:
     violates: [ISR-001]
-    note: "SysTick 中断里直接推进 LED 状态并忙等"
-    known_gap: "ISR-001 是 review 规则：platform/ 不在 BARR-C 门禁范围内，arch_lint 不检查 ISR 内容，自动检查全部通过"
+    note: "SysTick 中断里直接推进 LED 状态并忙等。加入 QEMU 链接后发现原变体缺少 app_led_service 的定义（只编译不链接时看不出），已在变体的 app/main.c 中补上；该函数仍由 app/main.c 与 platform 各自手写 extern 声明、没有公共头原型，同时违反 C-002"
+    known_gap: "ISR-001 是 review 规则：platform/ 不在 BARR-C 门禁范围内，arch_lint 不检查 ISR 内容，自动检查全部通过；QEMU 不做周期精确仿真，目标测试也测不出 ISR 耗时（ISR-006 需上板实测）"

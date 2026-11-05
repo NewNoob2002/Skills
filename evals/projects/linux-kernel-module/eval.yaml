@@ -1,0 +1,65 @@
+# 验证工程：Linux 内核树外模块（platform 驱动 + DT binding）
+# 不需要内核源码树：构建用运行内核的头文件包（/usr/lib/modules/$(uname -r)/build），checkpatch 用其中的
+# scripts/checkpatch.pl（--no-tree），binding 用固定版本的 dtschema 复现 dt_binding_check 的两步。
+# 未覆盖：sparse（make C=1）、KUnit、kselftest 与实际加载模块——前两者需要 sparse 或完整源码树，
+# 加载模块会改变本机内核状态，不在验证工程中执行。
+# 预期结果在运行前写定；首次运行的不一致及处理见 evals/TRIAGE.md。
+project: linux-kernel-module
+profile: linux-kernel
+summary: "ACME 帧接收 platform 驱动（devm、线程化中断、spinlock、dev_err_probe）与 DT schema binding；运行内核头文件构建 W=1 -Werror、checkpatch --strict、dtschema 校验。"
+checks:
+  kbuild:
+    # 77：没有运行内核的头文件包，记为 BLOCKED 而不是 FAIL
+    run: "test -d /usr/lib/modules/$(uname -r)/build || exit 77; make -s build"
+    requires: [make, perl]
+    blocked_codes: [77]
+    timeout: 300
+    rules: [LNXK-009]
+  checkpatch:
+    run: "test -x /usr/lib/modules/$(uname -r)/build/scripts/checkpatch.pl || exit 77; make -s checkpatch"
+    requires: [make, perl]
+    blocked_codes: [77]
+    rules: [LNXK-001, LNXK-002, LNXK-004, LNXK-007, LNXK-010]
+  dt_binding:
+    run: "sh check_binding.sh"
+    requires: [uv, dtc]
+    timeout: 300
+    rules: [LNXK-008]
+variants:
+  good: {}
+  bad-typedef:
+    violates: [LNXK-002]
+    note: "私有数据结构体 typedef 为 acme_frame_priv_t"
+    expect: {checkpatch: FAIL}
+  bad-no-spdx:
+    violates: [LNXK-007]
+    note: "删除首行 SPDX 标识"
+    expect: {checkpatch: FAIL}
+  bad-bug-on:
+    violates: [LNXK-010]
+    note: "线程化中断中用 BUG_ON 断言 FIFO 长度"
+    expect: {checkpatch: FAIL}
+  bad-missing-static:
+    violates: [LNXK-009]
+    note: "acme_frame_validate 去掉 static 且没有原型：-Wmissing-prototypes/-Wmissing-declarations 在 scripts/Makefile.warn 的默认组（不是 W=1 专属），配合 KCFLAGS=-Werror 使构建失败"
+    expect: {kbuild: FAIL}
+  bad-volatile-mmio:
+    violates: [LNXK-004]
+    note: "用 volatile 指针解引用代替 readl：checkpatch 报 volatile；没有 sparse 时构建不报 __iomem 地址空间问题"
+    expect: {checkpatch: FAIL}
+  bad-binding-no-additional:
+    violates: [LNXK-008]
+    note: "binding 缺少 additionalProperties/unevaluatedProperties"
+    expect: {dt_binding: FAIL}
+  bad-binding-example:
+    violates: [LNXK-008]
+    note: "示例节点使用 binding 中没有定义的属性"
+    expect: {dt_binding: FAIL}
+  bad-hungarian:
+    violates: [LNXK-002]
+    note: "成员与局部变量使用 p_/u32_ 类型前缀命名"
+    known_gap: "LNXK-002 的命名部分是 review 规则：checkpatch 只报 typedef，不识别匈牙利命名或类型前缀"
+  bad-sleep-in-hardirq:
+    violates: [LNXK-006]
+    note: "改为硬中断处理函数并在其中调用 usleep_range。首次运行用的是 msleep(1)，checkpatch 以“msleep < 20ms”的计时理由报告，并非发现上下文错误；改为 usleep_range 以隔离本规则（见 evals/TRIAGE.md）"
+    known_gap: "LNXK-006 是 review 规则：构建与 checkpatch 都不检查中断上下文睡眠；运行期需 CONFIG_DEBUG_ATOMIC_SLEEP 在目标上发现"

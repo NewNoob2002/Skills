@@ -1,8 +1,8 @@
 # 验证工程运行结果
 
-生成时间：2026-11-05 13:01:38；技能提交：`e586ced`。本文件由 `tools/run_evals.py` 生成，不要手改。
+生成时间：2026-11-05 17:46:15；技能提交：`efb394b-dirty`。本文件由 `tools/run_evals.py` 生成，不要手改。
 
-变体结论：MATCH 32，MISMATCH 0，NOT_RUN 0。
+变体结论：MATCH 43，MISMATCH 0，NOT_RUN 0。
 
 ## freertos-cpp（profile `mcu-rtos`）
 
@@ -26,6 +26,28 @@ C++17 遥测模块（滑动平均 + 纯虚输出接口）：Cortex-M0+ T0 目标
 
 - `cpp_cost`：needs cross_build (FAIL)
 
+## linux-kernel-module（profile `linux-kernel`）
+
+ACME 帧接收 platform 驱动（devm、线程化中断、spinlock、dev_err_probe）与 DT schema binding；运行内核头文件构建 W=1 -Werror、checkpatch --strict、dtschema 校验。
+
+| 变体 | 违反的规则 | 结论 | kbuild | checkpatch | dt_binding |
+| --- | --- | --- | --- | --- | --- |
+| `good` | — | MATCH | PASS | PASS | PASS |
+| `bad-typedef` | `LNXK-002` | MATCH | PASS | FAIL | PASS |
+| `bad-no-spdx` | `LNXK-007` | MATCH | PASS | FAIL | PASS |
+| `bad-bug-on` | `LNXK-010` | MATCH | PASS | FAIL | PASS |
+| `bad-missing-static` | `LNXK-009` | MATCH | FAIL | PASS | PASS |
+| `bad-volatile-mmio` | `LNXK-004` | MATCH | PASS | FAIL | PASS |
+| `bad-binding-no-additional` | `LNXK-008` | MATCH | PASS | PASS | FAIL |
+| `bad-binding-example` | `LNXK-008` | MATCH | PASS | PASS | FAIL |
+| `bad-hungarian` | `LNXK-002` | MATCH | PASS | PASS | PASS |
+| `bad-sleep-in-hardirq` | `LNXK-006` | MATCH | PASS | PASS | PASS |
+
+已知漏报（自动检查不能发现，需 review 或 test 补足）：
+
+- `bad-hungarian`：LNXK-002 的命名部分是 review 规则：checkpatch 只报 typedef，不识别匈牙利命名或类型前缀
+- `bad-sleep-in-hardirq`：LNXK-006 是 review 规则：构建与 checkpatch 都不检查中断上下文睡眠；运行期需 CONFIG_DEBUG_ATOMIC_SLEEP 在目标上发现
+
 ## linux-userspace（profile `linux-userspace`）
 
 守护进程基础库：写满全部字节（部分写与 EINTR）、配置原子保存、消息名解析、信号处理；Ceedling + CMock + ASan/UBSan。
@@ -37,7 +59,7 @@ C++17 遥测模块（滑动平均 + 纯虚输出接口）：Cortex-M0+ T0 目标
 | `bad-eintr` | `LNXU-001` | MATCH | PASS | PASS | FAIL |
 | `bad-unchecked-fsync` | `LNXU-001`, `LNXU-002` | MATCH | PASS | PASS | FAIL |
 | `bad-nonatomic-save` | `LNXU-002` | MATCH | PASS | PASS | FAIL |
-| `bad-name-overflow` | `GEN-010`, `PROTO-001` | MATCH | PASS | PASS | FAIL |
+| `bad-name-overflow` | `GEN-010` | MATCH | PASS | PASS | FAIL |
 | `bad-signal-printf` | `LNXU-004` | MATCH | PASS | PASS | PASS |
 
 已知漏报（自动检查不能发现，需 review 或 test 补足）：
@@ -48,20 +70,21 @@ C++17 遥测模块（滑动平均 + 纯虚输出接口）：Cortex-M0+ T0 目标
 
 分层的 LED 控制固件：interface + module/ledctl + bsp + platform 向量入口 + app 组合根；Ceedling 测试 ledctl。
 
-| 变体 | 违反的规则 | 结论 | arch_lint | barrc | warnings | cross_build | unit |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `good` | — | MATCH | PASS | PASS | PASS | PASS | PASS |
-| `bad-layering` | `ARCH-001` | MATCH | FAIL | PASS | PASS | PASS | FAIL |
-| `bad-hal-call` | `ARCH-004` | MATCH | FAIL | FAIL | PASS | PASS | FAIL |
-| `bad-signed-bitwise` | `C-005` | MATCH | PASS | FAIL | PASS | PASS | PASS |
-| `bad-implicit-decl` | `C-014` | MATCH | PASS | FAIL | FAIL | FAIL | FAIL |
-| `bad-missing-braces` | `CFMT-002` | MATCH | PASS | FAIL | PASS | PASS | PASS |
-| `bad-toggle-late` | 缺陷：ledctl_tick 用 > 代替 >=，LED 晚一个节拍翻转 | MATCH | PASS | PASS | PASS | PASS | FAIL |
-| `bad-isr-heavy` | `ISR-001` | MATCH | PASS | PASS | PASS | PASS | PASS |
+| 变体 | 违反的规则 | 结论 | arch_lint | barrc | warnings | cross_build | qemu | unit |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `good` | — | MATCH | PASS | PASS | PASS | PASS | PASS | PASS |
+| `bad-layering` | `ARCH-001` | MATCH | FAIL | PASS | PASS | PASS | PASS | FAIL |
+| `bad-hal-call` | `ARCH-004` | MATCH | FAIL | FAIL | PASS | PASS | FAIL | FAIL |
+| `bad-signed-bitwise` | `C-005` | MATCH | PASS | FAIL | PASS | PASS | PASS | PASS |
+| `bad-implicit-decl` | `C-014` | MATCH | PASS | FAIL | FAIL | FAIL | FAIL | FAIL |
+| `bad-missing-braces` | `CFMT-002` | MATCH | PASS | FAIL | PASS | PASS | PASS | PASS |
+| `bad-toggle-late` | 缺陷：ledctl_tick 用 > 代替 >=，LED 晚一个节拍翻转 | MATCH | PASS | PASS | PASS | PASS | FAIL | FAIL |
+| `bad-isr-name` | 缺陷：SysTick 中断入口名写成 Systick_Handler，与向量表不符，中断落到弱符号默认处理函数 | MATCH | PASS | PASS | PASS | PASS | FAIL | PASS |
+| `bad-isr-heavy` | `ISR-001` | MATCH | PASS | PASS | PASS | PASS | PASS | PASS |
 
 已知漏报（自动检查不能发现，需 review 或 test 补足）：
 
-- `bad-isr-heavy`：ISR-001 是 review 规则：platform/ 不在 BARR-C 门禁范围内，arch_lint 不检查 ISR 内容，自动检查全部通过
+- `bad-isr-heavy`：ISR-001 是 review 规则：platform/ 不在 BARR-C 门禁范围内，arch_lint 不检查 ISR 内容，自动检查全部通过；QEMU 不做周期精确仿真，目标测试也测不出 ISR 耗时（ISR-006 需上板实测）
 
 ## zephyr-app（profile `zephyr`）
 
@@ -78,10 +101,10 @@ C++17 遥测模块（滑动平均 + 纯虚输出接口）：Cortex-M0+ T0 目标
 
 已知漏报（自动检查不能发现，需 review 或 test 补足）：
 
-- `bad-no-device-ready`：ZEP-004 是 review 规则：checkpatch、clang-format 与 native_sim 上的构建和测试都不能发现缺少就绪检查（console 设备在 native_sim 上总是就绪）
+- `bad-no-device-ready`：ZEP-004 是 review 规则：checkpatch 与 clang-format 不分析就绪检查；sample 是 build_only，ztest 只链接 tests/parser 与 src/frame_parser.c，src/main.c 的 main() 从不执行，设备是否就绪无从观察
 
 ## 规则覆盖
 
-`verify.method: auto` 的规则共 44 条，被至少一个变体违反并检验的有 13 条：`ARCH-001`, `ARCH-004`, `C-005`, `C-014`, `CFMT-002`, `CPP-001`, `CPP-002`, `CPP-004`, `CPP-005`, `CPP-008`, `CPP-009`, `ZEP-001`, `ZEP-002`。
+`verify.method: auto` 的规则共 44 条，被至少一个变体违反并检验的有 19 条：`ARCH-001`, `ARCH-004`, `C-005`, `C-014`, `CFMT-002`, `CPP-001`, `CPP-002`, `CPP-004`, `CPP-005`, `CPP-008`, `CPP-009`, `LNXK-002`, `LNXK-004`, `LNXK-007`, `LNXK-008`, `LNXK-009`, `LNXK-010`, `ZEP-001`, `ZEP-002`。
 
 所有 `coverage: full` 的规则都至少被一个变体检验。

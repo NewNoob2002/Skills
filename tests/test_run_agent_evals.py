@@ -183,6 +183,66 @@ class SummaryTest(unittest.TestCase):
                           "summary": {"a": agg}}, cases)
         self.assertIn("应触发用例中实际使用技能 0/1", text)
 
+    def test_repeat_aggregates_per_case(self):
+        cases = [{"id": "D", "category": "decision"}]
+        records = [
+            {"agent": "a", "id": "D", "category": "decision", "rep": r, "status": st,
+             "run": {"skill_used": used}, "checks": [] if st == "PASS" else [{"check": "contains", "pass": False,
+                                                                                 "detail": "x"}]}
+            for r, st, used in [(1, "PASS", True), (2, "FAIL", False), (3, "PASS", True)]
+        ]
+        agg = ra.summarize(records, cases)["a"]
+        self.assertEqual(agg["status"]["PASS"], 2)
+        text = ra.render({"generated": "t", "commit": "c", "judge_model": "m", "repeat": 3, "judged": "j",
+                          "records": records, "summary": {"a": agg}}, cases)
+        self.assertIn("| D | decision | 2/3 | 2/3 | #2 contains: x |", text)
+        self.assertIn("重评：j", text)
+        self.assertIn("通过率 2/3", text)
+
+    def test_wilson_bounds(self):
+        self.assertEqual(ra.wilson(0, 0), (0.0, 1.0))
+        lo, hi = ra.wilson(5, 5)
+        self.assertLess(lo, 1.0)
+        self.assertEqual(hi, 1.0)
+        lo, hi = ra.wilson(10, 20)
+        self.assertAlmostEqual((lo + hi) / 2, 0.5, places=6)
+
+
+class RejudgeTest(unittest.TestCase):
+    def test_only_blocked_verdicts_are_rejudged(self):
+        cases = {"G": {"id": "G", "prompt": "p", "rubric": ["r"]}}
+        records = [
+            {"agent": "a", "id": "G", "category": "guardrail", "status": "NOT_RUN", "checks": [],
+             "run": {"final": "x"}, "judge": {"status": "BLOCKED", "reason": "judge output not parseable"}},
+            {"agent": "a", "id": "G", "category": "guardrail", "status": "FAIL", "checks": [],
+             "run": {"final": "y"}, "judge": {"status": "FAIL", "items": []}},
+        ]
+        with mock.patch.object(ra, "judge", return_value={"status": "PASS", "items": []}) as j:
+            n = ra.rejudge({"records": records}, cases, "m", 5, 2)
+        self.assertEqual((n, j.call_count), (1, 1))
+        self.assertEqual([r["status"] for r in records], ["PASS", "FAIL"])
+
+
+class SandboxSetupTest(unittest.TestCase):
+    def test_setup_runs_before_commit(self):
+        real = ra.subprocess.run
+
+        def fake(cmd, *a, **kw):
+            if cmd[:2] == ["sh", str(ra.REPO / "install.sh")]:  # 不真正安装技能
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return real(cmd, *a, **kw)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(ra.subprocess, "run", side_effect=fake):
+                repo = ra.make_sandbox("claude", "mcu-baremetal-c", Path(tmp),
+                                       "mkdir -p build && echo elf > build/app.elf", "G01")
+            self.assertEqual(repo.name, "repo-claude-G01")
+            tracked = ra.subprocess.run(["git", "-C", str(repo), "ls-files", "build/app.elf"],
+                                        capture_output=True, text=True, check=True).stdout
+            self.assertEqual(tracked.strip(), "build/app.elf")
+            with self.assertRaises(ra.subprocess.CalledProcessError):
+                ra.make_sandbox("claude", "mcu-baremetal-c", Path(tmp), "exit 3", "BAD")
+
 
 if __name__ == "__main__":
     unittest.main()

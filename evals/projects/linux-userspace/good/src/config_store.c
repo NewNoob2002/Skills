@@ -18,7 +18,11 @@ int config_save(const char *dir, const char *path, const uint8_t *data, size_t l
     if ((dir == NULL) || (path == NULL) || ((data == NULL) && (len > 0U))) {
         return -EINVAL;
     }
-    if (snprintf(tmp, sizeof(tmp), "%s%s", path, TMP_SUFFIX) >= (int)sizeof(tmp)) {
+    ret = snprintf(tmp, sizeof(tmp), "%s%s", path, TMP_SUFFIX);
+    if (ret < 0) {
+        return -EINVAL;
+    }
+    if (ret >= (int)sizeof(tmp)) {
         return -ENAMETOOLONG;
     }
 
@@ -46,6 +50,8 @@ int config_save(const char *dir, const char *path, const uint8_t *data, size_t l
         return -errno;
     }
     ret = (sysio_fsync(fd) != 0) ? -errno : 0;
-    (void)sysio_close(fd);
+    if ((sysio_close(fd) != 0) && (ret == 0)) {
+        ret = -errno;
+    }
     return ret;
 }

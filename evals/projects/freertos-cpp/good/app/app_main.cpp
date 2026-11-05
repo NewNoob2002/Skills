@@ -18,7 +18,7 @@ class DebugSink final : public proj::ReportSink
     }
 
   private:
-    std::int32_t volatile last_average_{0};
+    std::int32_t last_average_{0};
 };
 
 DebugSink                  g_sink;

@@ -1,5 +1,7 @@
 # 验证工程：Zephyr 应用（native_sim/native/64，无需 Zephyr SDK）
 # checkpatch 与 clang-format 使用 Zephyr 树内的官方配置；ztest 由 Twister 构建并运行。
+# 注意：checkpatch 未加 --strict（Zephyr fork 把花括号检查实现为 WARN，Linux 上游同位置是 CHK），
+# 花括号类结论绑定 Zephyr v4.5.0 的 checkpatch 实现，升级 Zephyr 后需复跑本工程。
 # 预期结果在运行前写定；首次运行的不一致及处理见 evals/TRIAGE.md。
 project: zephyr-app
 profile: zephyr
@@ -40,4 +42,4 @@ variants:
   bad-no-device-ready:
     violates: [ZEP-004]
     note: "使用设备前不检查 device_is_ready()"
-    known_gap: "ZEP-004 是 review 规则：checkpatch、clang-format 与 native_sim 上的构建和测试都不能发现缺少就绪检查（console 设备在 native_sim 上总是就绪）"
+    known_gap: "ZEP-004 是 review 规则：checkpatch 与 clang-format 不分析就绪检查；sample 是 build_only，ztest 只链接 tests/parser 与 src/frame_parser.c，src/main.c 的 main() 从不执行，设备是否就绪无从观察"

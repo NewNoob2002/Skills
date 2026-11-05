@@ -37,8 +37,8 @@ variants:
     note: "直接覆盖目标文件，不经临时文件与 rename"
     expect: {unit: FAIL}
   bad-name-overflow:
-    violates: [GEN-010, PROTO-001]
-    note: "复制名字前不检查输出缓冲区容量：超长名字在 ASan 下报 stack-buffer-overflow"
+    violates: [GEN-010]
+    note: "复制名字前不检查输出缓冲区容量：超长名字在 ASan 下报 stack-buffer-overflow。长度字段本身已按输入剩余长度校验，缺的是输出容量校验（接口契约），不是 PROTO-001 的帧长检查"
     expect: {unit: FAIL}
   bad-signal-printf:
     violates: [LNXU-004]
