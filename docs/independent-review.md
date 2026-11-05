@@ -3,7 +3,7 @@
 日期：2026-11-05。复核对象是 `evals/projects/*/eval.yaml` 的预期、样例与技能检查脚本。这些预期与样例由同一作者编写，
 因此用一个独立模型做只读复核，只看源码、检查命令与工具的实际行为，不执行任何检查。
 
-复核模型：`magpie/workbuddy/deepseek-v4.1-flash`（与被测的 Claude Code、Codex 及评委模型不同源），只开放 `read`/`grep`/`glob` 工具，
+复核模型：`magpie/workbuddy/deepseek-v4.1-flash`（与被测的 Claude Code、Codex 不同源；与最终评委是同一模型，原定评委 Gemini 4 Argon 因区域限制不可用，因此复核无法独立于评委偏好，这是本轮的局限），只开放 `read`/`grep`/`glob` 工具，
 工作目录是工程定义、样例与技能脚本的只读副本。
 
 | 工程 | 变体数 | 复核结论 |
@@ -14,7 +14,7 @@
 | `mcu-baremetal-c` | 9 | 9 AGREE |
 | `zephyr-app` | 6 | 6 AGREE |
 
-结论为 DISAGREE 的 4 项都是 good 样例自身违反强制规则，UNSURE 的 1 项是失败机制描述；处理记录见 `../evals/TRIAGE.md` 第三轮（#13–#22）。
+表中 DISAGREE 为 2 项（`freertos-cpp`、`linux-userspace` 的 good）；另有 2 个 good 样例的强制规则违规（`mcu-baremetal-c` 的 `C-008`、`linux-kernel-module` 的 `LNXK-005`）写在对应工程的“其他发现”里，因为该变体的表行判定为 AGREE（检查结果确实符合预期）。合计 4 个 good 样例违反强制规则，UNSURE 的 1 项是失败机制描述；处理记录见 `../evals/TRIAGE.md` 第三轮（#13–#22）。
 修正后 `python3 tools/run_evals.py --strict` 重跑：43 MATCH、0 MISMATCH、0 NOT_RUN。
 
 ## 复核提示词

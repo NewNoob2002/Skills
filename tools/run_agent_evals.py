@@ -205,15 +205,17 @@ def judge(case: dict, run: dict, model: str, timeout: int) -> dict:
         proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
                               check=False, cwd=tempfile.gettempdir())
     except subprocess.TimeoutExpired:
-        return {"status": BLOCKED, "reason": "judge timeout"}
+        return {"status": BLOCKED, "reason": "judge timeout", "model": model}
     match = re.search(r"\{.*\}", proc.stdout, re.DOTALL)
     try:
         items = json.loads(match.group(0))["items"] if match else None
     except (ValueError, KeyError, TypeError):
         items = None
     if not isinstance(items, list) or len(items) != len(case["rubric"]):
-        return {"status": BLOCKED, "reason": "judge output not parseable", "raw": proc.stdout[-800:]}
-    return {"status": PASS if all(bool(i.get("pass")) for i in items) else FAIL, "items": items}
+        return {"status": BLOCKED, "reason": "judge output not parseable", "raw": proc.stdout[-800:],
+                "model": model}
+    return {"status": PASS if all(bool(i.get("pass")) for i in items) else FAIL, "items": items,
+            "model": model}
 
 
 def combine(det_ok: bool, jstat: str) -> str:
@@ -231,7 +233,9 @@ def rejudge(report: dict, cases: dict, model: str, timeout: int, jobs: int, ever
 
     def one(rec: dict) -> None:
         if everything:
-            rec["judge_prev"] = {**rec["judge"], "model": report.get("judge_model")}
+            prev = dict(rec["judge"])
+            prev.setdefault("model", report.get("judge_model"))
+            rec["judge_prev"] = prev
         rec["judge"] = judge(cases[rec["id"]], rec["run"], model, timeout)
         rec["status"] = combine(all(c["pass"] for c in rec.get("checks", [])), rec["judge"]["status"])
 
@@ -239,7 +243,11 @@ def rejudge(report: dict, cases: dict, model: str, timeout: int, jobs: int, ever
         list(pool.map(one, todo))
     if everything:
         report["judge_model_prev"] = report.get("judge_model")
-        report["judge_model"] = model
+    # 逐条记录评委模型；部分重评后报告里可能同时存在两个评委
+    models = sorted({r["judge"].get("model") for r in report["records"]
+                     if r.get("judge") and r["judge"].get("model")})
+    if models:
+        report["judge_model"] = " + ".join(models)
     report["judged"] = time.strftime("%Y-%m-%d %H:%M:%S")
     return len(todo)
 
@@ -428,8 +436,9 @@ def main(argv: list[str] | None = None) -> int:
         repos = {}
         for agent in agents:
             if shutil.which(agent) is None:
-                records += [{"agent": agent, "id": c["id"], "category": c["category"], "status": NOT_RUN,
-                             "reason": f"{agent} CLI not found"} for c in cases]
+                records += [{"agent": agent, "id": c["id"], "category": c["category"], "rep": r,
+                             "status": NOT_RUN, "reason": f"{agent} CLI not found"}
+                            for c in cases for r in range(1, args.repeat + 1)]
                 continue
             repos[agent] = make_sandbox(agent, data["sandbox"], Path(tmp))
         jobs = []

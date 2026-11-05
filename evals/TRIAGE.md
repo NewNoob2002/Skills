@@ -26,9 +26,9 @@
 
 ## 第三轮：独立复核（2026-11-05）
 
-验证工程的预期与样例由同一作者编写，独立性不足，因此用另一个模型做只读复核：给出 5 个工程的定义、样例与技能检查脚本，逐变体判断“是否确实违反所列规则”“预期是否符合工具实际行为”“known_gap 是否属实”“good 是否本身违规”。复核者与编写者、与被测 Agent 均不同源（`magpie/workbuddy/deepseek-v4.1-flash`，只读工具，输出见 `docs/independent-review.md`）。
+验证工程的预期与样例由同一作者编写，独立性不足，因此用另一个模型做只读复核：给出 5 个工程的定义、样例与技能检查脚本，逐变体判断“是否确实违反所列规则”“预期是否符合工具实际行为”“known_gap 是否属实”“good 是否本身违规”。复核者与编写者、与被测 Agent 均不同源，但与最终评委是同一模型（`magpie/workbuddy/deepseek-v4.1-flash`，只读工具，输出见 `docs/independent-review.md`）。
 
-43 个变体（含 5 个 good）中 38 个判定为 AGREE，4 个 good 判定为 DISAGREE（样例自身违反强制规则），1 个为 UNSURE（`freertos-cpp` / `bad-std-function` 的失败机制，已用实际 ELF 输出确认）。DISAGREE 均成立并已修正样例；另有若干 note 与实际机制不符，已更正。
+43 个变体（含 5 个 good）中 40 个判定为 AGREE，2 个判定为 DISAGREE（`freertos-cpp` 与 `linux-userspace` 的 good），1 个为 UNSURE（`freertos-cpp` / `bad-std-function` 的失败机制，已用实际 ELF 输出确认）。另有 2 个 good 样例的违规记在复核报告的“其他发现”里（`mcu-baremetal-c` 的 `C-008`、`linux-kernel-module` 的 `LNXK-005`），合计 4 个 good 样例违反强制规则，均已修正；另有若干 note 与实际机制不符，已更正。
 
 | # | 工程 / 变体 | 现象 | 分类 | 处理 |
 | --- | --- | --- | --- | --- |

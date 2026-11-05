@@ -222,6 +222,38 @@ class RejudgeTest(unittest.TestCase):
         self.assertEqual((n, j.call_count), (1, 1))
         self.assertEqual([r["status"] for r in records], ["PASS", "FAIL"])
 
+    def test_partial_rejudge_records_both_judges(self):
+        # 只重评 BLOCKED 条目时，报告不能把新结论归给旧评委
+        cases = {"G": {"id": "G", "prompt": "p", "rubric": ["r"]}}
+        records = [
+            {"agent": "a", "id": "G", "category": "guardrail", "status": "NOT_RUN", "checks": [],
+             "run": {"final": "x"}, "judge": {"status": "BLOCKED", "reason": "x", "model": "old"}},
+            {"agent": "a", "id": "G", "category": "guardrail", "status": "PASS", "checks": [],
+             "run": {"final": "y"}, "judge": {"status": "PASS", "items": [], "model": "old"}},
+        ]
+        report = {"records": records, "judge_model": "old"}
+        with mock.patch.object(ra, "judge", return_value={"status": "PASS", "items": [], "model": "new"}):
+            ra.rejudge(report, cases, "new", 5, 2)
+        self.assertEqual(records[0]["judge"]["model"], "new")
+        self.assertEqual(report["judge_model"], "new + old")
+
+
+class MainTest(unittest.TestCase):
+    def test_missing_agent_cli_records_every_repeat(self):
+        spec = ("sandbox: mcu-baremetal-c\ncases:\n"
+                "  - id: X\n    category: trigger\n    prompt: p\n    expect_skill: true\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = Path(tmp) / "cases.yaml"
+            cases.write_text(spec, encoding="utf-8")
+            runs = Path(tmp) / "runs"
+            with mock.patch.object(ra, "CASES", cases), mock.patch.object(ra, "RUNS", runs), \
+                    mock.patch.object(ra.shutil, "which", return_value=None):
+                code = ra.main(["--agents", "claude", "--repeat", "3", "--no-judge"])
+            self.assertEqual(code, 0)
+            summary = json.loads((next(runs.glob("*/summary.json"))).read_text(encoding="utf-8"))
+            self.assertEqual([r["rep"] for r in summary["records"]], [1, 2, 3])
+            self.assertTrue(all(r["status"] == "NOT_RUN" for r in summary["records"]))
+
 
 class SandboxSetupTest(unittest.TestCase):
     def test_setup_runs_before_commit(self):
