@@ -1,0 +1,51 @@
+# AGENTS.md — <项目名>
+
+<!-- 复制到固件仓库根目录（Claude Code 可再建 CLAUDE.md，内容只写一行 @AGENTS.md）。
+     本文件每次会话都会加载，保持简短；详细规则在 embedded-engineering 技能中按需加载。
+     尖括号占位符全部替换为已核实的事实，未知项写 UNKNOWN，不要猜。 -->
+
+## Profile
+
+- 本仓库 profile：`<mcu-rtos | mcu-baremetal | zephyr | linux-kernel | linux-userspace>`（多 profile 时按目录列出）
+  - `<firmware/>` → `<mcu-rtos>`
+  - `<linux/drivers/>` → `<linux-kernel>`
+- 处理嵌入式任务时加载 `embedded-engineering` 技能，并遵循其中对应 profile 的规则。
+
+## 目标与工具链（已核实）
+
+| 项 | 值 | 来源 |
+| --- | --- | --- |
+| MCU/SoC 与修订版 | `<STM32G474RET6 rev Z>` | `<数据手册/丝印>` |
+| 板卡与修订版 | `<board rev B>` | `<原理图版本>` |
+| SDK/RTOS 版本 | `<STM32CubeG4 1.6.0 / FreeRTOS 11.1.0>` | `<manifest/lock 文件>` |
+| 工具链 | `<arm-none-eabi-gcc 14.2>` | `<CMake toolchain 文件>` |
+| 调试器 | `<ST-Link V3 / J-Link>` | |
+
+## 命令
+
+```sh
+<构建>          # 例：cmake --preset release && cmake --build --preset release
+<单元测试>      # 例：ceedling test:all
+<覆盖率>        # 例：ceedling gcov:all
+<规范检查>      # 例：sh <skill>/scripts/barrc/check.sh $(git ls-files 'module/*.[ch]')
+<架构检查>      # 例：python3 <skill>/scripts/arch_lint.py .
+<size/map>      # 例：arm-none-eabi-size build/app.elf
+```
+
+## 项目特有规则（覆盖技能默认值）
+
+- 代码规范基线：`<BARR-C:2018 | Zephyr | Linux kernel>`；偏离记录：`<docs/deviations.md>`
+- 生成代码目录（不重排、不格式化）：`<platform/stm32g4/>`、`<middleware/>`
+- 动态内存：`<初始化后禁止>`
+- 注释语言：`<中文 | English（上游代码必须英文）>`
+
+## 硬件与安全
+
+- 未经明确授权，不得 flash、擦除、写 option bytes/eFuse、改安全启动配置、驱动执行器或电源设备。
+- 授权的硬件操作：`<例：允许对 /dev/ttyACM0 上的开发板执行 st-flash write，禁止 option bytes>`
+- 共享资源（调试器、串口、电源）不得并发使用。
+
+## 提交
+
+- Agent 不添加 `Signed-off-by`；生成代码在提交信息中记录工具与模型（`Assisted-by: <agent>:<model>`），由具名人类作者审查并负责。
+- 报告中每项检查标明 `PASS / FAIL / NOT_RUN / BLOCKED`，仿真结果不等于硬件结果。

@@ -1,0 +1,29 @@
+# 来源与版本（核实日期 2026-11-04）
+
+上游会更新。规则与当前上游不一致时，以上游为准，并更新本技能。
+
+| 角色 | 来源 | 使用方式 | 许可 |
+| --- | --- | --- | --- |
+| Agent 工作流基础 | <https://github.com/brunofbloq/embedded-agent-skills> | 借鉴 architect/developer/qa 分工、两阶段架构门、证据级别、任务契约；**独立改写，未复制原文**（该仓库未声明许可证） | 未声明 |
+| MCU 架构规则参考 | <https://github.com/rovinax/embedded-skills> | 分层架构、驱动、ISR、RTOS 规则，按 BARR-C 与实际工程修订 | MIT |
+| C 代码规范基线 | BARR-C:2018 *Embedded C Coding Standard*，<https://barrgroup.com/embedded-c-coding-standard> | 规则编号与要点（意译） | 免费发布 |
+| BARR-C 门禁 | <https://github.com/netrinomike/barr-c>（Barr Group 官方 enforcement kit，`2018/`，commit `75bcc16`） | 原样附带 `.clang-format`、`.clang-tidy`、`.editorconfig`、`check.sh`、`COMPILER_FLAGS.md`、`CODE_GENERATION_POLICY.md` | MIT |
+| MCU 测试基线 | Ceedling <https://github.com/ThrowTheSwitch/Ceedling>（1.2.2），文档 `docs/` 与 mkdocs 站点 | 1.x 配置、命令、插件 | MIT |
+| Zephyr 规范 | <https://docs.zephyrproject.org/latest/contribute/style/code.html>、`/contribute/coding_guidelines/`、`/contribute/guidelines.html`、`/develop/test/ztest.html` | 风格、MISRA 子集、提交规则、ztest/Twister | Apache-2.0 文档 |
+| Linux 规范 | 内核树 `Documentation/process/coding-style.rst`、`submitting-patches.rst`、`coding-assistants.rst`、`generated-content.rst`；`Documentation/dev-tools/kunit/` | 风格、提交、AI 辅助规则、测试 | GPL-2.0 文档 |
+| Modern Embedded C++ | Pigweed <https://github.com/google/pigweed>（`docs/sphinx/embedded_cpp_guide.rst`、`size_optimizations.rst`、`style/cpp.rst`，commit `dd2d565`） | 标准库白/灰/黑名单、无异常与无堆策略、ISR/线程安全标注、尺寸优化选项 | Apache-2.0 |
+| 同上 | modm <https://github.com/modm-io/modm>（`docs/src/how-modm-works.md`、`docs/coding_convention.md`，commit `8e942c2`） | 静态类型外设、编译期波特率/分频校验 | MPL-2.0 |
+| 同上 | ETL <https://github.com/ETLCPP/etl>（commit `b2c437c`） | 固定容量容器、`queue_spsc_isr`、`delegate`、`expected`、`etl_profile.h` | MIT |
+| 同上 | C++ Core Guidelines <https://github.com/isocpp/CppCoreGuidelines>（commit `5baf9fe`） | 规则编号与要点（意译） | Standard C++ Foundation 许可 |
+| C++ 测试基线 | CppUTest <https://github.com/cpputest/cpputest>（发布版 v4.0；文档与 API 核对于 commit `42feb87`） | CppUTest/CppUMock 用法、CMake 目标名 | BSD 风格 |
+| Zephyr C++ | <https://docs.zephyrproject.org/latest/develop/languages/cpp/index.html>、`lib/cpp/Kconfig` | C++ Kconfig、minimal libc++ 限制 | Apache-2.0 文档 |
+| MISRA C++:2023 | MathWorks/QA Systems 公开资料 | 面向 C++17，取代 MISRA C++:2008 与 AUTOSAR C++14 | — |
+
+## 已知需要随上游复核的点
+
+- Zephyr 的 `Assisted-by:` 格式与 coding guidelines 规则表（随版本变化）。
+- Linux 分配辅助宏（`kmalloc_obj` 等为较新内核引入，旧 BSP 内核没有）。
+- Ceedling 1.x 次版本新增的选项（Partials、Sanitize 插件）。
+- C++ 开销表随工具链变化：新工具链落地时运行 `scripts/bench/run.sh` 并更新 `cpp-features.md` §4。
+- CppUTest 新发布版（v4.0 之后）的 CMake 目标名与 CMake 版本要求。
+- BARR-C:2026 版发布后（官方 kit 计划提供 `2026/` 目录与机器可读规则清单），替换本技能的 2018 基线。

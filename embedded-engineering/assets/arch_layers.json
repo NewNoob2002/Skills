@@ -1,0 +1,32 @@
+{
+  "_comment": "MCU 分层依赖规则，供 scripts/arch_lint.py 使用。layers 按顺序匹配，第一个匹配的 glob 决定文件所属层。allow：可被包含的层。forbid_includes：禁止包含的头文件模式（fnmatch，同时匹配 #include 路径与其 basename；@name 引用 include_sets）。forbid_code：禁止出现的代码模式（引用 code_patterns）。shared：任何层都可包含的公共目录。osal：RTOS 原语的包装（如 os_mutex.hpp），只允许 app 使用；module 通过模板参数或 interface 获得锁。",
+  "exclude": ["build/**", "tests/**", "test/**", "vendor/**", "**/.git/**"],
+  "shared": ["common/**", "util/**", "utils/**", "lib/**"],
+  "layers": [
+    {"name": "app",           "globs": ["app/**"],           "allow": ["app", "module", "interface", "bsp", "osal", "driver_bus", "driver_device", "middleware"], "forbid_includes": ["@vendor"],          "forbid_code": ["hal_call", "register_access"]},
+    {"name": "module",        "globs": ["module/**"],        "allow": ["module", "interface"],                                                         "forbid_includes": ["@vendor", "@rtos"], "forbid_code": ["hal_call", "register_access"]},
+    {"name": "interface",     "globs": ["interface/**"],     "allow": ["interface"],                                                                   "forbid_includes": ["@vendor", "@rtos"], "forbid_code": ["hal_call", "register_access"]},
+    {"name": "driver_device", "globs": ["driver/device/**"], "allow": ["driver_device", "interface"],                                                  "forbid_includes": ["@vendor", "@rtos"], "forbid_code": ["hal_call", "register_access"]},
+    {"name": "driver_bus",    "globs": ["driver/bus/**"],    "allow": ["driver_bus", "interface", "platform", "middleware"],                           "forbid_includes": [],                   "forbid_code": []},
+    {"name": "bsp",           "globs": ["bsp/**"],           "allow": ["bsp", "interface", "driver_bus", "driver_device", "platform", "middleware"],   "forbid_includes": [],                   "forbid_code": []},
+    {"name": "osal",          "globs": ["osal/**"],          "allow": ["osal", "interface", "platform", "middleware"],                                 "forbid_includes": [],                   "forbid_code": []},
+    {"name": "middleware",    "globs": ["middleware/**"],    "allow": ["middleware", "platform"],                                                      "forbid_includes": [],                   "forbid_code": []},
+    {"name": "platform",      "globs": ["platform/**"],      "allow": ["platform"],                                                                    "forbid_includes": [],                   "forbid_code": []}
+  ],
+  "cycle_check_layers": ["module"],
+  "include_sets": {
+    "vendor": [
+      "stm32*.h", "gd32*.h", "core_cm*.h", "cmsis_*.h", "nrf*.h", "fsl_*.h", "esp_*.h",
+      "driver/*.h", "hal/*.h", "soc/*.h", "hardware/*.h", "pico/*.h",
+      "at32*.h", "ch32*.h", "MK*.h", "LPC*.h", "sam*.h", "py32*.h"
+    ],
+    "rtos": [
+      "FreeRTOS.h", "task.h", "queue.h", "semphr.h", "event_groups.h", "timers.h",
+      "cmsis_os.h", "cmsis_os2.h", "rtthread.h", "rtdef.h", "tx_api.h"
+    ]
+  },
+  "code_patterns": {
+    "hal_call": "\\b(?:HAL|LL|DL|nrfx|nrf)_[A-Za-z0-9_]+\\s*\\(",
+    "register_access": "\\b[A-Z][A-Z0-9_]*\\s*->\\s*[A-Z][A-Z0-9_]*\\b"
+  }
+}

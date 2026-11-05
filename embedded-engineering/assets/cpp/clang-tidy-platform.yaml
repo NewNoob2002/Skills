@@ -1,0 +1,7 @@
+# 复制为 platform/.clang-tidy：继承上级 C++ 配置，只为 MMIO 与 DMA 描述符访问放开两项检查。
+# 其他目录不得使用本文件。
+---
+InheritParentConfig: true
+Checks: >
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Embedded Engineering"
+  short_description: "MCU/RTOS/Zephyr/Linux embedded C workflow with BARR-C, Ceedling and upstream rules"

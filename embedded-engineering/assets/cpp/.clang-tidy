@@ -1,0 +1,76 @@
+# C++ 文件的 clang-tidy 配置（embedded-engineering，方案 A）。
+# 放在 C++ 源码目录；C 文件继续使用 assets/barr-c/.clang-tidy。
+# 需要 clang-tidy 17+。platform/ 目录追加 assets/cpp/clang-tidy-platform.yaml 中的豁免。
+#
+# 关闭项及原因：
+#   bugprone-easily-swappable-parameters       寄存器/地址类接口大量同类型参数，噪声过大
+#   cppcoreguidelines-avoid-magic-numbers      与 readability-magic-numbers 重复
+#   cppcoreguidelines-avoid-non-const-global-variables
+#                                              静态分配要求全局对象；只允许出现在 app/ 组合根，由审查把关
+#   cppcoreguidelines-owning-memory            依赖 GSL owner<>，嵌入式不引入 GSL
+#   cppcoreguidelines-pro-bounds-constant-array-index
+#                                              要求 gsl::at，嵌入式不引入 GSL；越界由断言/掩码保证
+#   cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+#                                              同上：嵌入式容器的 .at() 会抛异常或 abort；索引由掩码/断言保证
+#   cppcoreguidelines-pro-type-reinterpret-cast / pro-bounds-pointer-arithmetic
+#                                              仅在 platform/ 豁免（MMIO、DMA 描述符），见 clang-tidy-platform.yaml
+---
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  performance-*,
+  modernize-deprecated-headers,
+  modernize-use-override,
+  modernize-use-nullptr,
+  modernize-use-using,
+  modernize-use-equals-default,
+  modernize-use-equals-delete,
+  misc-const-correctness,
+  misc-redundant-expression,
+  misc-static-assert,
+  misc-unused-parameters,
+  misc-unused-using-decls,
+  hicpp-signed-bitwise,
+  readability-braces-around-statements,
+  readability-function-size,
+  readability-identifier-naming,
+  readability-magic-numbers
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*'
+CheckOptions:
+  cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
+  # span 是“指针 + 长度”，按值传递是惯用法（Core Guidelines F.16），不要改成 const 引用。
+  performance-unnecessary-value-param.AllowedTypes: 'etl::span;std::span;pw::span;std::string_view;etl::string_view'
+  readability-function-size.LineThreshold: 100
+  readability-magic-numbers.IgnoredIntegerValues: '0;1;2;8;16;32;64'
+  readability-magic-numbers.IgnorePowersOf2IntegerValues: true
+  # 命名（方案 A）：类型 CamelCase；函数/变量 lower_case；私有/受保护成员后缀 _；
+  # 常量 k 前缀；可变全局变量 g_ 前缀（作用域标记，不编码类型）；宏全大写。
+  readability-identifier-naming.NamespaceCase: lower_case
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.TypeAliasCase: CamelCase
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.ConceptCase: CamelCase
+  readability-identifier-naming.TemplateParameterCase: CamelCase
+  readability-identifier-naming.FunctionCase: lower_case
+  readability-identifier-naming.MethodCase: lower_case
+  readability-identifier-naming.VariableCase: lower_case
+  readability-identifier-naming.ParameterCase: lower_case
+  readability-identifier-naming.PrivateMemberSuffix: _
+  readability-identifier-naming.ProtectedMemberSuffix: _
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.EnumConstantPrefix: k
+  readability-identifier-naming.ConstexprVariableCase: CamelCase
+  readability-identifier-naming.ConstexprVariablePrefix: k
+  readability-identifier-naming.GlobalVariablePrefix: g_
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
