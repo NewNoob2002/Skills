@@ -648,7 +648,7 @@ rules:
       method: review
 
   - id: ISR-005
-    title: "调用 FreeRTOS API 的中断，优先级数值不小于 configMAX_SYSCALL_INTERRUPT_PRIORITY，并开启 configASSERT"
+    title: "调用 FreeRTOS API 的中断，优先级逻辑上不高于 syscall 阈值，数值比较须统一移位编码，并开启 configASSERT"
     level: mandatory
     profiles: [mcu-rtos]
     lang: [c, cpp]

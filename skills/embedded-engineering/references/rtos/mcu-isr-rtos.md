@@ -42,7 +42,7 @@ imu_drdy_isr (void)
 
 - ISR 中只用 `FromISR` API：`xQueueSendFromISR`、`xSemaphoreGiveFromISR`、`vTaskNotifyGiveFromISR`、`xTaskNotifyFromISR`，结束时 `portYIELD_FROM_ISR(woken)`。
 - CMSIS-RTOS2 中 `osMessageQueuePut`、`osSemaphoreRelease`、`osEventFlagsSet`、`osThreadFlagsSet` 可在 ISR 调用，但**超时参数必须为 0**。
-- **FreeRTOS + Cortex-M 优先级**：数值越小优先级越高。调用任何 FreeRTOS API 的 ISR，其优先级数值必须 **≥** `configMAX_SYSCALL_INTERRUPT_PRIORITY`（即逻辑上不高于它）。优先级高于此阈值的中断（如数值 0 的控制环定时器）**不能调用任何 FreeRTOS API**，只能通过寄存器级机制（如挂起一个较低优先级的软件中断）把事件传递出去。开启 `configASSERT` 让移植层检查这一点。
+- **FreeRTOS + Cortex-M 优先级**：数值越小优先级越高。调用 FreeRTOS API 的 ISR，优先级须逻辑上不高于 syscall 阈值；比较数值前必须统一编码。`configMAX_SYSCALL_INTERRUPT_PRIORITY` 是已移位的寄存器编码，CMSIS `NVIC_SetPriority()` 使用未移位的逻辑值（若工程定义 `configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`，应与它比较）。例如实现 4 位优先级时，寄存器阈值 `0x50` 对应 CMSIS 参数 `5`，不能拿 `5` 与 `0x50` 直接比较（[FreeRTOS 官方说明](https://github.com/FreeRTOS/FreeRTOS-Kernel-Book/blob/main/ch07.md)）。高于阈值的中断（如数值 0 的控制环定时器）**不能调用任何 FreeRTOS API**，只能通过寄存器级机制（如挂起较低优先级的软件中断）传递事件。开启 `configASSERT` 让移植层检查这一点。
 - 中断优先级按实时关键性分配：控制环时基 > 传感器数据就绪/DMA > 通信 > 人机交互。通信突发不得推迟控制环。
 
 ## 4. 任务设计

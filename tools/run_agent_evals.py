@@ -199,13 +199,13 @@ JUDGE_PROMPT = """你是独立评审。下面是用户给一个编程 Agent 的�
 def judge(case: dict, run: dict, model: str, timeout: int) -> dict:
     rubric = "\n".join(f"{i}. {r}" for i, r in enumerate(case["rubric"], 1))
     prompt = JUDGE_PROMPT.format(prompt=case["prompt"], rubric=rubric, answer=run["final"][:12000])
-    cmd = ["omp", "-p", "--model", model, "--thinking", "low", "--no-tools", "--no-session", "--no-skills",
+    cmd = ["omp", "-p", "--model", model, "--thinking", "high", "--no-tools", "--no-session", "--no-skills",
            "--no-rules", "--no-context-files", "--no-extensions", prompt]
     try:
         proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
                               check=False, cwd=tempfile.gettempdir())
     except subprocess.TimeoutExpired:
-        return {"status": BLOCKED, "reason": "judge timeout", "model": model}
+        return {"status": BLOCKED, "reason": "judge timeout", "model": model, "thinking": "high"}
     match = re.search(r"\{.*\}", proc.stdout, re.DOTALL)
     try:
         items = json.loads(match.group(0))["items"] if match else None
@@ -213,9 +213,9 @@ def judge(case: dict, run: dict, model: str, timeout: int) -> dict:
         items = None
     if not isinstance(items, list) or len(items) != len(case["rubric"]):
         return {"status": BLOCKED, "reason": "judge output not parseable", "raw": proc.stdout[-800:],
-                "model": model}
+                "model": model, "thinking": "high"}
     return {"status": PASS if all(bool(i.get("pass")) for i in items) else FAIL, "items": items,
-            "model": model}
+            "model": model, "thinking": "high"}
 
 
 def combine(det_ok: bool, jstat: str) -> str:

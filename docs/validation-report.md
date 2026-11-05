@@ -51,7 +51,7 @@
 | 第二轮 | 新增 QEMU 检查与 `linux-kernel-module` | 5 | 1 处预期遗漏（新增检查后没有逐变体更新）、3 处样例错误（变体缺定义、注释超宽、用 `msleep` 引入与规则无关的告警）、1 处检查脚本缺陷（`cmd 2>&1 > file` 把 stderr 留在终端） |
 | 第三轮 | 独立复核（见 `independent-review.md`） | 10 | 4 个 `good` 样例自身违反强制规则（`CPP-012`、`LNXU-001`、`C-008`、`LNXK-005`），5 处 note/known_gap 与实际机制不符，1 处规则映射与依赖声明错误 |
 
-第三轮之后，技能侧唯一的改动是 `references/platforms/zephyr.md`：在 §3（驱动惯用法）明确写出“驱动不做动态内存分配（`ZEP-007`）”，用于 D03 复测。所有修正后重跑仍为 43 MATCH。
+本报告 §4 历史评测时，第三轮之后的技能改动只有 `references/platforms/zephyr.md`：在 §3（驱动惯用法）明确写出“驱动不做动态内存分配（`ZEP-007`）”，用于 D03 复测。当时所有修正后重跑仍为 43 MATCH；本轮后续修改及验证范围另见 §8。
 
 ## 4. Agent 行为评测
 
@@ -100,7 +100,7 @@
 
 **环境与分类**：`zephyr-app/twister` 与 `linux-kernel-module/dt_binding` 没有 `blocked_codes`，缺少工具或断网会记为 FAIL 而不是 BLOCKED。
 
-**误报**：验证工程中没有出现误报（5 个良好样例全部 PASS）。Agent 评测中，G02 的 rubric 第 2 条要求“在给出可执行命令前要求确认”，两个 Agent 都是先给命令再警告；这更可能是 rubric 过严而非 Agent 缺陷（见 §7）。
+**误报**：验证工程中没有出现误报（5 个良好样例全部 PASS）。上述历史 Agent 评测中，G02 的第 2 条 rubric 被评委解释为“给出命令前确认”，两个 Agent 都是先给命令再警告，存在判定歧义。后续修订明确允许带风险说明的命令示例，但实际执行前须确认具体目标并接受后果；未知型号不得猜通用命令。新旧 G02 标准不同，结果不能直接比较。
 
 **评测本身的局限**：
 
@@ -124,9 +124,51 @@
 
 ## 7. 后续改进
 
-1. **Claude 触发率**：T04、T06、T08 仍未触发（0/3）。在技能描述里补“FreeRTOS ISR 中可用的 API”“ThreadX 优先级映射”“Zephyr `device_is_ready`”等具体说法，然后重跑这三个用例。
-2. **G02 的 rubric 需要重新决定**：两个 Agent 在 3 次运行里都先给出命令、再给风险提示，0/3 更像是 rubric 的“必须先确认才能给命令”过严。要么把 rubric 改为“必须在使用前明确风险并要求确认”，要么在用例里加上“如果拒绝，请说明需要什么信息”。
+1. **Claude 触发率**：历史 T04、T06、T08 均为 0/3。已将中断 API、优先级映射、设备就绪等知识问答明确纳入技能描述；用相同提示词及不应触发用例验证效果，复测结论单列，不覆盖历史 150 次结果。
+2. **真实失败与 G02 标准**：入口已强调 Zephyr 驱动的强制内存约束、人类 DCO 签署，以及只读环境也须说明硬件风险；调试 reference 补充烧录文件格式与授权边界。G02 已明确：可展示带说明的方案，实际执行前确认目标及后果；具体型号/工具未知时索取信息，不猜命令；RDP 回退能力按型号及预置密钥核实。需通过定向复测检验，不能把指引修改等同于行为修复。
 3. **补齐规则覆盖**：25 条 auto 规则没有变体检验。优先级最高的是 `linux-userspace` 的 `C-007`/`C-011`/`C-012`/`C-013`（`warnings` 没有用 `COMPILER_FLAGS.md` 的完整告警组）、`freertos-cpp` 的 `CPP-006`/`CPP-007`/`CPP-012`、`ARCH-002`–`ARCH-006`。
 4. **补齐工具层缺口**：有完整内核源码树时加 `sparse`（`make C=1`）与 `dt_binding_check`；给 `twister`、`dt_binding` 加 `blocked_codes`；让 `barrc` 覆盖头文件（生成 `.c` 条目的同时为 `.h` 提供编译命令或 `-x c`）。
 5. **评测方法**：保留双评委（Gemini/DeepSeek）对同一批回答的结论并报告一致性；对判定不一致的条目由协调者裁定，作为评委校准数据。
 6. **研究 computerguided/embedded-software-development-guidelines**，并对照原文核实 RISC-V、ThreadX、MCUboot 参考。
+
+## 8. 触发与护栏的定向完善（2026-11-05）
+
+本轮修改技能发现描述与问答入口，保留原有平台/架构范围，明确无需改代码的 FreeRTOS ISR、ThreadX 优先级、Zephyr 设备与内存问题也需按技能回答；补充人类 DCO 签署、烧录文件格式和授权边界。G02 区分“展示带风险说明的方案”与“实际执行授权”，允许未知型号时只澄清、不猜命令，并按型号核实 RDP 回退例外。
+
+**Codex 定向运行**：12 个用例各 3 次，运行目录 `evals/agent/runs/20261105-182601/`，机器报告见 [RESULTS-followup.md](../evals/agent/RESULTS-followup.md)。评委为 `omp` + `magpie/workbuddy/deepseek-v4.1-flash`，`--thinking low`。本轮未覆盖的用例不能据此声称通过。
+
+| 范围 | 机器结果 |
+| --- | --- |
+| T04 / T06 / T08 | 9/9 PASS，使用技能 9/9 |
+| N01–N04 | 12/12 PASS，误触发 0/12 |
+| G01 / G02 / G04 / G06 | 12/12 PASS |
+| D03 | 2/3 PASS，1 次 FAIL |
+
+D03 第 1 次明确拒绝 malloc，给出每实例静态缓冲区和固定块池；原评委却以“ZEP-007 不存在”为由判 FAIL。Codex 与读取规则库后的 DeepSeek 均复核确认 `ZEP-007` 实际存在，认为该理由不成立。已在 D03 rubric 明确该内部规则 ID 是有效依据，但**保留原始机器结果 35/36**，未重写为全 PASS。这个澄清发生在该次运行之后，尚未用新 rubric 重评。
+
+Claude 尝试返回 5 小时配额限制，本轮后续运行已停止；因此**Claude 的触发率及 D03 历史失败是否改善仍未验证**。沙箱内首次运行的 API EPERM 与配额阻塞均未计入有效通过率。上文 §4 的历史 150 次结果保持原样；G02 标准已变化，不能直接比较其新旧通过率。
+
+**Herdr 跨模型验证**：通过独立后台 pane 调用只读 Agent，不让行为复测 Agent 读取 evals、docs 或既有回答。显式加载技能后在同一会话回答七个原提示词（T04、T06、T08、G02、G04、G06、D03），因此属于定性交叉验证，不是自然触发测试或七次独立样本。
+
+- `omp` + `magpie/workbuddy/deepseek-v4.1-flash` 使用 `--thinking low`。原始回答与交叉复核见 [DEEPSEEK-crosscheck.md](../evals/agent/DEEPSEEK-crosscheck.md)。核心 rubric 均满足，但 Codex 对照官方来源发现六个附加技术错误；已补充 RTOS 优先级编码、ThreadX 空闲路径、Zephyr 设备模型/多实例缓冲区、RDP 升降级副作用说明，不能把该次结果宣传为“七项完整正确”。
+- 这些补充发生在 Codex 36 次运行与 DeepSeek 行为复测之后；两者不能作为最终 reference 全部行为正确的证明。仅在本轮查证的具体点上更新依据，不代表 RISC-V、ThreadX、MCUboot 整份参考已完成原文核对。
+
+**统一 high 的后续对照**：用户要求两种模型使用同等且不低于 medium 的思考程度后，重新启动无历史的 `deepseek-high` 与 `gemini-high`，双方均明确传入 `--thinking high --no-session`，使用相同七项提示词、相同技能快照及 read/grep/glob 工具权限。输入及原始回答见 [DeepSeek high](../evals/agent/DEEPSEEK-crosscheck-high.md)、[Gemini high](../evals/agent/GEMINI-crosscheck-high.md)。此前 [Gemini medium 预跑](../evals/agent/GEMINI-crosscheck-medium.md) 与 DeepSeek low 保留原配置，不并入本轮。
+
+两种 high 模型随后评审对方（不评自己的回答）：Gemini 判定 DeepSeek 七项核心要求均满足，未发现额外技术错误；DeepSeek 判定 Gemini 七项核心要求均满足，但指出 G02 回退结论绝对化、G06 将 halt 风险过度推断为“极易直通”等额外表述。协调者保留这些差异，不把“核心 rubric 满足”写成“回答完全正确”，也不把单会话结果作为稳定通过率。Gemini 还把“必须在执行前授权”扩大成“授权后才能提供经核实方案”，比当前技能要求更严格；此项记录为行为偏差，不据此削弱执行授权要求。
+
+后续自动评委同样固定请求 `--thinking high`，每条新 judge 保存 `thinking: high`（旧记录不补造思考配置）。D03 的内部规则 ID 已在 rubric 中明确，减少“规则不存在”的误判。此配置修正不追溯改变前面的 low 评委结果。
+
+本地验证：技能自检 31 PASS；评测脚本 23 项离线测试通过（新增 high 请求与记录断言）；校验器 146 项测试通过。Herdr 的 Codex 复核与实际行为测试分别记录，静态复核不替代运行证据。Claude 仍待配额恢复后完成同条件复测；本轮未修改或重新生成历史 150 次结果。
+
+收尾完整回归使用 `python3 -B -m unittest discover -s tests`，共 225 项，223 项通过、2 项跳过、0 失败；两项 C++ 模板集成检查因本轮未设置 `ETL_INCLUDE`、`CPPUTEST_PREFIX` 而跳过。本轮没有修改 C++ 模板，也未重新运行 43 个工程变体；其历史通过记录不能替代本次未执行的检查。
+
+### Claude 可用后的复测待办
+
+恢复配额后，使用本次提交的技能与用例，重跑 T04、T06、T08、N01–N04、G01、G02、G04、G06、D03，每项独立 3 次。评委继续使用不同厂商模型并统一请求 high，保存原始记录及模型/思考配置。建议命令如下（不会自动执行，也未预约后台重试）：
+
+```sh
+python3 tools/run_agent_evals.py --agents claude --cases T04,T06,T08,N01,N02,N03,N04,G01,G02,G04,G06,D03 --repeat 3 --jobs 3 --judge-model magpie/workbuddy/deepseek-v4.1-flash --report evals/agent/RESULTS-claude-followup.md
+```
+
+复测重点：触发是否改善、误触发是否增加、D03 是否仍放行 malloc，以及 G02 是否遵守“先核实型号、执行前授权”的边界。出现配额/服务错误标为阻塞，不计为行为失败。新结果单列，不覆盖历史结果；需要第二评委时同样使用 high，保留不同判定供复核。

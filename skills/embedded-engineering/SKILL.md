@@ -1,17 +1,17 @@
 ---
 name: embedded-engineering
 description: >-
-  Embedded C and modern C++ (C++17/20) engineering workflow and rule baseline for MCU bare-metal,
-  RTOS (FreeRTOS/ThreadX/CMSIS-RTOS2), Zephyr, embedded Linux kernel/driver and Linux userspace code.
-  Use when designing, writing, reviewing, refactoring, testing or debugging firmware, drivers, ISRs, BSP,
-  HAL wrappers, devicetree/Kconfig, kernel modules, or embedded C/C++ modules; when asked for BARR-C,
-  MISRA-style checks, C++ feature trade-offs (RAII, templates, virtual, constexpr, heap, exceptions),
-  ETL/Pigweed/modm usage, Flash/RAM cost evaluation, Ceedling/CppUTest host tests, ztest/Twister,
-  KUnit, checkpatch, or layered firmware architecture; also HardFault/trap and fault-register analysis,
-  bootloader/OTA/firmware update and power-loss safety, state machines and protocol parsing, ThreadX, RISC-V.
-  嵌入式 C/C++ 开发工作流与规范基线：MCU 裸机/RTOS、Zephyr、嵌入式 Linux 驱动与用户态；架构评审、
-  编码、代码审查、BARR-C 与现代 C++ 规范、Ceedling/CppUTest 单元测试、ISR/驱动/RTOS 设计、开销评估、
-  HardFault 排查、bootloader/OTA 升级、状态机与协议解析。
+  Embedded C/C++17/20 engineering for MCU bare-metal, FreeRTOS/ThreadX, Zephyr, Linux drivers/userspace.
+  Use when designing, coding, reviewing, testing or debugging firmware; also for API/rule questions without edits:
+  FreeRTOS ISR-safe calls (xQueueSendFromISR), ThreadX priority mapping, Zephyr DEVICE_DT_GET/device_is_ready,
+  driver buffer allocation, flash/RDP safety and upstream DCO/AI attribution.
+  Covers BARR-C, modern C++ feature/Flash/RAM trade-offs, ETL/Pigweed/modm, Ceedling/CppUTest, ztest/Twister,
+  KUnit/checkpatch, HardFault/traps, bootloader/OTA power-loss safety, protocol parsing and RISC-V.
+  Also covers CMSIS-RTOS2, BSP/HAL wrappers, devicetree/Kconfig, layered architecture, state machines,
+  firmware refactoring, MISRA-style checks and C++ feature choices (RAII, templates, virtual, constexpr,
+  heap, exceptions).
+  嵌入式 C/C++ 开发、审查与测试；也用于 FreeRTOS 中断 API、ThreadX 优先级换算、Zephyr 设备就绪与驱动内存、
+  烧录/读保护、上游提交规范等知识问答，以及 HardFault、OTA 与掉电安全。
 ---
 
 # Embedded Engineering Baseline
@@ -21,9 +21,10 @@ description: >-
 ## 0. 不可违反的护栏（所有 profile）
 
 - **硬件动作必须授权**：flash、mass-erase、eFuse/OTP、option bytes、secure boot、驱动执行器/电源设备前，必须得到对该目标和影响范围的明确授权，并说明恢复路径。
+- **命令示例不等于执行授权**：给烧录/保护命令时同时说明覆盖或不可逆后果，要求确认具体芯片、目标板/探针与影响；型号或工具版本未知时先索取，不猜地址、option bytes 或命令。RDP Level 2 默认按不可逆处理，能否回退须按具体型号及预置密钥核实；准备可复核方案后，在实际执行前取得授权（见 [调试授权](references/verification/debugging.md) §1）。
 - **不编造硬件事实**：寄存器、位域、时钟、引脚复用、DMA 通道、errata、SDK API 必须来自仓库内头文件/数据手册/参考手册/板级原理图；查不到就标为 `UNKNOWN` 并提问。
 - **证据分级**：host 测试、静态检查、仿真、HIL、实测各自给出 `PASS / FAIL / NOT_RUN / BLOCKED`。没有跑过就是 `NOT_RUN`，仿真通过不等于硬件通过。
-- **溯源**：Agent 不得添加 `Signed-off-by`（Zephyr 与 Linux 均明确禁止）。生成代码需记录工具/模型（Zephyr 用 `Assisted-by:`，BARR-C 生成代码政策要求记录工具与版本，并有具名人类作者负责）。
+- **溯源**：Agent 不得添加 `Signed-off-by`（Zephyr 与 Linux 均明确禁止），即使环境只读或没有补丁，也应说明 DCO 由人类审查并签署，而非仅以工具权限拒绝。生成代码需记录工具/模型（Zephyr 用 `Assisted-by:`，BARR-C 生成代码政策要求记录工具与版本，并有具名人类作者负责）。
 
 ## 1. 选择 profile（先做这一步）
 
@@ -40,6 +41,8 @@ description: >-
 **规则库**：[standards/rules.yaml](standards/rules.yaml) 收录可机械检查、跨生态冲突或需要按 ID 引用的规则（`GEN`、`ARCH`、`C`、`CFMT`、`ISR`、`RTOS`、`DMA`、`CPP`、`ZEP`、`LNXK`、`LNXU`、`TEST`），每条给出适用 profile、强制等级、验证方法和出处章节。某 profile 适用的规则 = `profiles` 含该 profile 或 `all` 的条目；每个 profile 文件（上表第一列链接）列出该 profile 的规范、测试基线和门禁命令。规则细节以 `ref` 指向的 reference 为准。
 
 **语言**：`.c/.h` 按上表的 C 规范；`.cpp/.hpp` 按 [cpp/coding.md](references/cpp/coding.md)，并按资源等级 T0–T3 取舍特性（[cpp/features.md](references/cpp/features.md)）。等级由 `detect_profile.py` 的 `resource_tier` 给出建议，需对照芯片资源确认。`linux-kernel` 不引入 C++；Zephyr 只在应用层使用 C++，内核、驱动、系统初始化保持 C。测试框架按 profile 与语言选择（见上表）：`mcu-*` 与 `linux-userspace` 的 C 用 Ceedling、C++ 用 CppUTest；`zephyr` 以 ztest + Twister 为准，只有不依赖 Zephyr API 的纯逻辑可额外做 host 测试；`linux-kernel` 用 KUnit/kselftest。
+
+**平台问答也按规则回答**：题目中的平台决定该问题的 profile，不以沙箱示例工程覆盖它。Zephyr 驱动缓冲区按 `ZEP-007` 不用 malloc/通用堆；先说明约束，再给每实例静态缓冲区或固定块池方案，不能用“可以，但不推荐”替代强制规则（见 [Zephyr](references/platforms/zephyr.md) §3）。
 
 **规则优先级**（高 → 低）：运行时/授权限制 → 项目显式规则（`AGENTS.md`、`CLAUDE.md`、既有 `.clang-format`、MISRA 偏离记录）→ 目标生态官方规范（Zephyr/Linux，**向上游提交时强制**）→ BARR-C → 分层架构规则 → 本工作流默认值。冲突的详细裁决见 [profiles.md](references/profiles.md)。
 

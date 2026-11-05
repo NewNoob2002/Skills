@@ -12,6 +12,10 @@ ThreadX 现为 Eclipse ThreadX（MIT 许可）。适用 `mcu-rtos`；ISR、任�
 | 内存池 | block pool 定长、确定性；byte pool 变长、非确定性 | heap_1…heap_5 | RT 路径只用 block pool |
 | 队列消息 | 消息大小以 32 位字为单位（1、2、4、8、16 个字） | 以字节为单位 | 大消息改为传递指针或索引 |
 
+不要把 FreeRTOS 的 idle task 套到 ThreadX：ThreadX 在无就绪线程时进入调度器的空闲等待路径，并无通用的“固定优先级为 `TX_MAX_PRIORITIES-1` 的 idle 线程”约定。迁移 idle hook 或低功耗逻辑时按目标端口核实（[Cortex-M4/GNU 调度器源码](https://github.com/eclipse-threadx/threadx/blob/master/ports/cortex_m4/gnu/src/tx_thread_schedule.S)）。
+
+优先级映射先检查两侧范围；不能不加条件就套用 `TX_MAX_PRIORITIES - 1 - p`。若使用 `p_tx = N - 1 - p_freertos`，其中 `N = configMAX_PRIORITIES`，须满足 `0 <= p_freertos < N` 且 `TX_MAX_PRIORITIES >= N`；有预留优先级或范围不足时按实际使用的等级重排，并核对定时器线程与抢占阈值（[ThreadX 线程优先级](https://github.com/eclipse-threadx/rtos-docs/blob/main/rtos-docs/threadx/chapter3.md)）。
+
 ## 2. ISR 中的服务调用（`TX-001`）
 
 - ISR 中只能调用允许在中断中使用的服务，等待选项必须是 `TX_NO_WAIT`。

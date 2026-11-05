@@ -121,7 +121,7 @@ research/                       # 来源矩阵与规范冲突分析
 | 项 | 结果 |
 | --- | --- |
 | `python3 tools/validate_skill.py`（技能 13 项 + README、docs/、research/ 的 6 份文档各 3 项检查，共 31 项） | PASS |
-| `python3 -m unittest discover -s tests -v`（221 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试、clang-tidy 检查名有效性、run_evals 与 run_agent_evals 语义；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 后无跳过） | PASS |
+| `python3 -m unittest discover -s tests -v`（历史验收 221 个用例；后续评测工具修复与验证见 `docs/validation-report.md` §8；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 后运行完整模板检查） | 历史验收 PASS；本轮验证见 `docs/validation-report.md` §8 |
 | `python3 tools/run_evals.py --strict`：5 个验证工程、43 个变体（5 个良好样例 + 38 个故意引入问题的变体），结果见 `evals/RESULTS.md` | PASS：43 MATCH，0 MISMATCH，0 NOT_RUN；5 个已知漏报（review 规则）均已登记 |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |

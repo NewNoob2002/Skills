@@ -130,6 +130,15 @@ class JudgeParseTest(unittest.TestCase):
     def fake_proc(self, stdout):
         return SimpleNamespace(stdout=stdout, returncode=0)
 
+    def test_judge_requests_and_records_high_thinking(self):
+        case = {"prompt": "p", "rubric": ["a"]}
+        with mock.patch.object(ra.subprocess, "run", return_value=self.fake_proc(
+                '{"items": [{"index": 1, "pass": true}]}')) as run:
+            result = ra.judge(case, {"final": "x"}, "model", 5)
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("--thinking") + 1], "high")
+        self.assertEqual((result["model"], result["thinking"]), ("model", "high"))
+
     def test_parses_json_and_requires_item_count(self):
         case = {"prompt": "p", "rubric": ["a", "b"]}
         ok = '前言 {"items": [{"index": 1, "pass": true}, {"index": 2, "pass": false}]} 后记'
