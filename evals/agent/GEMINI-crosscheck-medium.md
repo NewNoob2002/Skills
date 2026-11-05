@@ -57,4 +57,3 @@
       静态分配，缓冲区长度取自 Devicetree 属性或 Kconfig 常量；
    2. 定长内存池：需要多个固定大小的缓冲块时，使用 K_MEM_SLAB_DEFINE 定义确定性的定长块池；
    3. 环形缓冲/队列：流式数据接收使用静态定义的 ring_buf（RING_BUF_DECLARE）或 K_MSGQ_DEFINE。
-

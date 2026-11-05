@@ -59,4 +59,3 @@
      取自 devicetree 属性或 Kconfig 常量；
    - 若需多个固定大小缓冲块，使用确定性的定长内存块池 K_MEM_SLAB_DEFINE；
    - 队列与环形缓冲使用 K_MSGQ_DEFINE 或 ring_buf（RING_BUF_DECLARE）。
-
