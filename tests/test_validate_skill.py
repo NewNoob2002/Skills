@@ -7,6 +7,7 @@
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -297,7 +298,7 @@ class ReviewRegressionTest(MutationTest):
     def test_03_colon_space_in_plain_scalar_is_invalid(self):
         self.set_frontmatter("name: embedded-engineering\ndescription: Use when: firmware")
         self.assert_only_fails("frontmatter")
-        self.assertTrue(any("quote it" in m for m in self.messages("frontmatter")))
+        self.assertTrue(any("not valid YAML" in m for m in self.messages("frontmatter")))
 
     def test_03_integer_metadata_key_and_hex_value(self):
         self.set_frontmatter("name: embedded-engineering\ndescription: Use when testing\nmetadata:\n"
@@ -319,16 +320,16 @@ class ReviewRegressionTest(MutationTest):
             self.assertEqual(got["frontmatter"], "PASS", self.messages("frontmatter"))
 
     def test_04_unsupported_yaml_without_pyyaml_is_not_run(self):
-        # 回归：load_yaml 在没有 PyYAML 时曾因裸 raise 抛出 ImportError 而崩溃
         self.set_frontmatter("{name: embedded-engineering, description: Use when testing}")
-        got = self.statuses(no_site=True)
-        self.assertEqual(got["frontmatter"], "NOT_RUN")
-        self.assertEqual(got["data-yaml"], "NOT_RUN")
+        code, _out, err = run_tool("--json", "--config", CONFIG, self.skill, no_site=True)
+        self.assertEqual(code, 2)
+        self.assertIn("error: PyYAML is required; run: uv run --with pyyaml python3 tools/validate_skill.py", err)
 
     def test_04_flow_mapping_metadata_without_pyyaml(self):
         self.set_frontmatter('name: embedded-engineering\ndescription: Use when testing\nmetadata: {author: "qa"}')
-        got = self.statuses(no_site=True)
-        self.assertEqual(got["frontmatter"], "NOT_RUN")  # 能力不足，不是“非法 YAML”
+        code, _out, err = run_tool("--json", "--config", CONFIG, self.skill, no_site=True)
+        self.assertEqual(code, 2)
+        self.assertIn("error: PyYAML is required; run: uv run --with pyyaml python3 tools/validate_skill.py", err)
 
     def test_04_heterogeneous_keys_do_not_crash(self):
         self.set_frontmatter("name: embedded-engineering\ndescription: Use when testing\n0: zero\nother: value")
@@ -362,10 +363,13 @@ class ReviewRegressionTest(MutationTest):
         self.assert_only_fails("links")
 
     def test_09_reference_style_link_counts_for_reachability(self):
-        replace(self.entry(), "[profiles.md](references/profiles.md)。\n\n**项目常驻规则**",
-                "[profiles.md][profiles-route]。\n\n[profiles-route]: references/profiles.md\n\n**项目常驻规则**")
+        text = self.entry().read_text(encoding="utf-8")
+        self.assertGreaterEqual(text.count("[profiles.md](references/profiles.md)"), 2)
+        text = text.replace("[profiles.md](references/profiles.md)", "[profiles.md][profiles-route]")
+        text += "\n[profiles-route]: references/profiles.md\n"
+        self.entry().write_text(text, encoding="utf-8")
+        self.assertNotIn("(references/profiles.md)", self.entry().read_text(encoding="utf-8"))
         self.assertEqual(self.statuses(expect_exit=0), self.baseline)
-
     def test_10_icon_outside_skill(self):
         (self.tmp / "outside.png").write_bytes(b"\x89PNG")
         append(self.skill / "agents" / "openai.yaml", '  icon_small: "../outside.png"\n')
@@ -387,6 +391,214 @@ class ReviewRegressionTest(MutationTest):
         self.entry().write_bytes(b"---\nname: x\n---\n\xff\n")
         got = self.statuses(expect_exit=1)
         self.assertEqual(got["frontmatter"], "FAIL")
+
+    # -- 第二轮审查发现（R2-1 至 R2-10、D1、D3）回归测试
+
+    def test_r2_01_keep_chomping_boundary_and_blank_space_line(self):
+        # 1025 字符（含分隔符前的换行）必须 FAIL；1024 字符必须 PASS
+        self.set_frontmatter("name: embedded-engineering\ndescription: |+\n  Use when " + "x" * 1013 + "\n\n\n")
+        self.assert_only_fails("frontmatter")
+        self.assertTrue(any("1025" in m for m in self.messages("frontmatter")), self.messages("frontmatter"))
+
+        self.set_frontmatter("name: embedded-engineering\ndescription: |+\n  Use when " + "x" * 1012 + "\n\n\n")
+        self.assertEqual(self.statuses(expect_exit=0), self.baseline)
+
+        # literal block 中间超出块缩进的纯空格行属于内容，不能被清空
+        self.set_frontmatter("name: embedded-engineering\ndescription: |\n  Use when\n"
+                             + " " * 100 + "\n  " + "x" * 920)
+        self.assert_only_fails("frontmatter")
+        self.assertTrue(any("1029" in m for m in self.messages("frontmatter")), self.messages("frontmatter"))
+
+    def test_r2_02_ambiguous_scalars_rejected_in_flow_mapping(self):
+        for snippet in ("metadata: {version: 0o17}", "metadata: {version: 1e3}", 'metadata: {yes: "1"}'):
+            with self.subTest(snippet=snippet):
+                self.set_frontmatter("name: embedded-engineering\ndescription: Use when testing\n" + snippet)
+                self.assert_only_fails("frontmatter")
+                self.assertTrue(any("quote it" in m for m in self.messages("frontmatter")),
+                                self.messages("frontmatter"))
+
+    def test_r2_03_colon_tab_and_nul_rejected(self):
+        for bad in ("name: embedded-engineering\ndescription: Use when:\tfirmware",
+                    "name: embedded-engineering\ndescription: Use when firmware\x00"):
+            with self.subTest(bad=bad):
+                self.set_frontmatter(bad)
+                self.assert_only_fails("frontmatter")
+
+    def test_r2_04_valid_yaml_constructs_and_merge_accepted(self):
+        self.set_frontmatter('name: embedded-engineering\ndescription:\n  Use when\n  testing\n'
+                             'metadata:\n  build#id: "1"\n  urn:tool: "qa"')
+        self.assertEqual(self.statuses(expect_exit=0), self.baseline)
+
+        self.set_frontmatter("name: embedded-engineering\ndescription: |-\n  Use when\n  \ttesting")
+        self.assertEqual(self.statuses(expect_exit=0), self.baseline)
+
+        self.set_frontmatter('name: embedded-engineering\ndescription: Use when testing\n'
+                             'metadata:\n  <<: &base {a: "1", b: "2"}\n  b: "3"')
+        self.assertEqual(self.statuses(expect_exit=0), self.baseline)
+
+        replace(self.skill / "standards" / "rules.yaml",
+                "    profiles: [mcu-baremetal, mcu-rtos]\n",
+                "    profiles: [mcu-baremetal, mcu-rtos,]\n")
+        self.assertEqual(self.statuses(expect_exit=0), self.baseline)
+    def test_r2_05_huge_integer_does_not_crash_cli(self):
+        self.set_frontmatter("name: embedded-engineering\ndescription: Use when testing\nmetadata:\n  n: "
+                             + "9" * 5000)
+        self.assert_only_fails("frontmatter")
+        self.assertTrue(any("line 4" in m for m in self.messages("frontmatter")), self.messages("frontmatter"))
+
+    def test_r2_06_unused_ref_def_not_reachable_and_ref_section_resolved(self):
+        orig = self.entry().read_text(encoding="utf-8")
+        # 删除所有指向 profiles.md 的 inline 链接，仅留未使用的引用定义 → reachability 必须 FAIL
+        no_inline = orig.replace("[profiles.md](references/profiles.md)", "profiles.md")
+        self.entry().write_text(no_inline + "\n[unused]: references/profiles.md\n", encoding="utf-8")
+        self.assert_only_fails("reachability")
+
+        # 恢复入口，在 features.md 中用引用式链接指向 coding.md §9（coding.md 有 §9，features.md 没有）
+        self.entry().write_text(orig, encoding="utf-8")
+        feat = self.skill / "references" / "cpp" / "features.md"
+        feat_orig = feat.read_text(encoding="utf-8")
+        feat.write_text(feat_orig + "\n见 [coding][c] §9、[c][] 的 §9 与 [c] §9。\n\n[c]: coding.md\n",
+                        encoding="utf-8")
+        self.assertEqual(self.statuses(expect_exit=0), self.baseline)
+
+        # 指向 coding.md 不存在的 §99 必须报在 coding.md 上
+        feat.write_text(feat_orig + "\n见 [coding][c] §99。\n\n[c]: coding.md\n", encoding="utf-8")
+        self.assert_only_fails("sections")
+        self.assertTrue(any("§99 not found in coding.md" in m for m in self.messages("sections")),
+                        self.messages("sections"))
+
+    def test_r2_07_normalized_paths_and_boundary(self):
+        prof = self.skill / "references" / "profiles.md"
+        orig = prof.read_text(encoding="utf-8")
+        prof.write_text(orig + "\n运行 `././scripts/nope.py`。\n", encoding="utf-8")
+        self.assert_only_fails("paths")
+        self.assertTrue(any("path not found: ././scripts/nope.py" in m for m in self.messages("paths")),
+                        self.messages("paths"))
+
+        (self.tmp / "README.md").write_text("# outside\n", encoding="utf-8")
+        prof.write_text(orig + "\n见 `scripts/../../../README.md`。\n", encoding="utf-8")
+        self.assert_only_fails("paths")
+        self.assertTrue(any("escapes skill directory: scripts/../../../README.md" in m
+                            for m in self.messages("paths")),
+                        self.messages("paths"))
+
+    def test_r2_08_unreadable_doc_blocks_and_empty_rules_fails(self):
+        bad_doc = self.tmp / "README.md"
+        bad_doc.write_bytes(b"\xff\xfe invalid utf-8\n")
+        code, out, err = run_tool("--json", "--config", CONFIG, self.skill, "--doc", bad_doc)
+        self.assertEqual(code, 1, err)
+        doc_res = [r for r in json.loads(out)["results"] if r["kind"] == "doc"][0]
+        doc_statuses = {c["id"]: c["status"] for c in doc_res["checks"]}
+        self.assertEqual(doc_statuses, {"links": "FAIL", "paths": "BLOCKED", "sections": "BLOCKED"})
+
+        (self.skill / "standards" / "rules.yaml").write_text("", encoding="utf-8")
+        got = self.statuses(expect_exit=1)
+        self.assertEqual(got["rules"], "FAIL")
+        self.assertEqual(got["profiles"], "BLOCKED")
+
+    def test_r2_09_wrong_field_types_and_internal_error_guard(self):
+        rules_path = self.skill / "standards" / "rules.yaml"
+        orig_rules = rules_path.read_text(encoding="utf-8")
+        mutated = orig_rules.replace("level: mandatory", "level: []", 1)
+        mutated = mutated.replace("method: review", "method: []", 1)
+        mutated = mutated.replace("tool: arch_lint", "tool: []", 1)
+        mutated = mutated.replace("conflicts: [ZEP-001, LNXK-001]", "conflicts: 1", 1)
+        rules_path.write_text(mutated, encoding="utf-8")
+        got = self.statuses(expect_exit=1)
+        self.assertEqual(got["rules"], "FAIL")
+
+        rules_path.write_text(orig_rules, encoding="utf-8")
+        replace(self.skill / "profiles" / "zephyr.yaml", "  - tool: twister\n", "  - tool: []\n")
+        self.assert_only_fails("profiles")
+
+        vs = load_tool_module()
+        orig_check_json = vs.check_json
+        try:
+            def boom(_skill, _check):
+                raise RuntimeError("synthetic failure")
+            vs.check_json = boom
+            res = vs.validate_skill(self.skill, {})
+        finally:
+            vs.check_json = orig_check_json
+        by_id = {c["id"]: c for c in res["checks"]}
+        self.assertEqual(by_id["data-json"]["status"], "FAIL")
+        self.assertTrue(any("internal error: RuntimeError: synthetic failure" in f["message"]
+                            for f in by_id["data-json"]["findings"]))
+        self.assertEqual(by_id["frontmatter"]["status"], "PASS")
+        self.assertEqual(by_id["rules"]["status"], "PASS")
+
+    def test_r2_10_non_empty_strings_inside_refs_and_d3_check_capability(self):
+        rules_path = self.skill / "standards" / "rules.yaml"
+        orig_rules = rules_path.read_text(encoding="utf-8")
+        mutated = orig_rules.replace('external: "west twister -T <dir>"', "external: null", 1)
+        mutated = mutated.replace("path: scripts/barrc/check.sh", 'path: ""', 1)
+        mutated = mutated.replace("      method: auto\n      tool: barrc_check\n",
+                                  "      method: auto\n      tool: barrc_check\n      check: not_a_real_check\n", 1)
+        rules_path.write_text(mutated, encoding="utf-8")
+        got = self.statuses(expect_exit=1)
+        self.assertEqual(got["rules"], "FAIL")
+        msgs = " ".join(self.messages("rules"))
+        self.assertIn("verify_tools.twister.external", msgs)
+        self.assertIn("verify_tools.barrc_check.path", msgs)
+        self.assertIn("barrc_check", msgs)
+        self.assertIn("check", msgs)
+
+        rules_path.write_text(orig_rules, encoding="utf-8")
+        (self.tmp / "outside.md").write_text("# outside\n", encoding="utf-8")
+        zep = self.skill / "profiles" / "zephyr.yaml"
+        ztext = zep.read_text(encoding="utf-8")
+        ztext = ztext.replace('summary: "Zephyr RTOS 应用、驱动与模块"', "summary: null")
+        ztext = ztext.replace("  - references/platforms/zephyr.md\n",
+                              "  - references/platforms/zephyr.md\n  - ../outside.md\n")
+        ztext = ztext.replace('    run: "west twister -T <tests/dir>"', "    run: null")
+        zep.write_text(ztext, encoding="utf-8")
+        self.assert_only_fails("profiles")
+        pmsgs = " ".join(self.messages("profiles"))
+        self.assertIn("summary", pmsgs)
+        self.assertIn("outside", pmsgs)
+        self.assertIn("gates", pmsgs)
+
+    def test_r2_12_13_14_d2_auto_coverage_and_gap_validation(self):
+        vs = load_tool_module()
+        rules_path = self.skill / "standards" / "rules.yaml"
+        orig_text = rules_path.read_text(encoding="utf-8")
+        data = vs.load_yaml(orig_text)
+        by_id = {r["id"]: r for r in data["rules"]}
+        must_be_partial = {
+            "C-006", "C-009", "C-011", "C-015", "CFMT-003", "CFMT-005",
+            "CPP-003", "CPP-004", "CPP-005", "CPP-006", "CPP-007", "CPP-008", "CPP-009",
+        }
+        for rid, rule in by_id.items():
+            verify = rule["verify"]
+            if verify["method"] == "auto":
+                self.assertIn(verify.get("coverage"), ("full", "partial"), f"{rid} missing coverage")
+                if verify.get("coverage") == "partial":
+                    self.assertTrue(isinstance(verify.get("gap"), str) and verify["gap"].strip(),
+                                    f"{rid} partial missing gap")
+            else:
+                self.assertNotIn("coverage", verify, f"{rid} non-auto has coverage")
+        for rid in must_be_partial:
+            self.assertEqual(by_id[rid]["verify"].get("coverage"), "partial", f"{rid} must be partial")
+
+        # auto 缺少 coverage 报错
+        rules_path.write_text(orig_text.replace("      coverage: full\n", "", 1), encoding="utf-8")
+        self.assert_only_fails("rules")
+        self.assertTrue(any("coverage" in m for m in self.messages("rules")), self.messages("rules"))
+
+        # partial 缺少 gap 报错
+        no_gap = re.sub(r"      coverage: partial\n      gap: [^\n]+\n", "      coverage: partial\n",
+                        orig_text, count=1)
+        rules_path.write_text(no_gap, encoding="utf-8")
+        self.assert_only_fails("rules")
+        self.assertTrue(any("gap" in m for m in self.messages("rules")), self.messages("rules"))
+
+        # 非 auto 写了 coverage 报错
+        rules_path.write_text(orig_text.replace("      method: review\n",
+                                                "      method: review\n      coverage: full\n", 1),
+                              encoding="utf-8")
+        self.assert_only_fails("rules")
+        self.assertTrue(any("coverage" in m for m in self.messages("rules")), self.messages("rules"))
+
 
 class RulesMutationTest(MutationTest):
     """standards/rules.yaml 与 profiles/ 的变异测试。"""
@@ -494,28 +706,28 @@ class RulesMutationTest(MutationTest):
         self.assertEqual(got["rules"], "NOT_RUN")
         self.assertEqual(got["profiles"], "FAIL")
 
-class YamlSubsetTest(unittest.TestCase):
+
+class YamlLoaderTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.vs = load_tool_module()
 
     def test_folded_and_literal_blocks(self):
-        data = self.vs.parse_yaml_subset("a: >-\n  one\n  two\n\n  three\nb: |\n  x\n  y\nc: plain # note\n")
+        data = self.vs.load_yaml("a: >-\n  one\n  two\n\n  three\nb: |\n  x\n  y\nc: plain # note\n")
         self.assertEqual(data, {"a": "one two\nthree", "b": "x\ny\n", "c": "plain"})
 
     def test_nested_map_list_and_scalars(self):
         text = ("interface:\n  display_name: \"Name\"\npolicy:\n  allow_implicit_invocation: false\n"
                 "dependencies:\n  tools:\n    - type: \"mcp\"\n      url: https://x.test/mcp\n    - plain\n")
-        data = self.vs.parse_yaml_subset(text)
+        data = self.vs.load_yaml(text)
         self.assertEqual(data["interface"], {"display_name": "Name"})
         self.assertIs(data["policy"]["allow_implicit_invocation"], False)
         self.assertEqual(data["dependencies"]["tools"], [{"type": "mcp", "url": "https://x.test/mcp"}, "plain"])
 
     def test_numbers_and_quotes(self):
-        data = self.vs.parse_yaml_subset("v: 1.0\nq: \"1.0\"\ns: 'it''s'\n")
+        data = self.vs.load_yaml("v: 1.0\nq: \"1.0\"\ns: 'it''s'\n")
         self.assertEqual(data, {"v": 1.0, "q": "1.0", "s": "it's"})
 
-    # 期望值由 PyYAML 6 计算后写死，无 PyYAML 的环境同样能比对
     BLOCK_CASES = [
         ("a: |+\n  x\n\n\n", "x\n\n\n"), ("a: |-\n  x\n\n", "x"), ("a: |\n  x\n\n", "x\n"),
         ("a: >-\n  aa\n    y\n", "aa\n  y"), ("a: >\n  a\n  b\n\n  c\n", "a b\nc\n"),
@@ -528,17 +740,10 @@ class YamlSubsetTest(unittest.TestCase):
     def test_block_scalars_match_yaml_spec(self):
         for text, expected in self.BLOCK_CASES:
             with self.subTest(text=text):
-                self.assertEqual(self.vs.parse_yaml_subset(text)["a"], expected)
-        try:
-            import yaml
-        except ImportError:
-            return
-        for text, _expected in self.BLOCK_CASES:
-            with self.subTest(pyyaml=text):
-                self.assertEqual(self.vs.parse_yaml_subset(text), yaml.safe_load(text))
+                self.assertEqual(self.vs.load_yaml(text)["a"], expected)
 
     def test_core_schema_scalars(self):
-        data = self.vs.parse_yaml_subset("h: 0x10\ni: .inf\nn: ~\nb: TRUE\ns: plain text\n")
+        data = self.vs.load_yaml("h: 0x10\ni: .inf\nn: ~\nb: TRUE\ns: plain text\n")
         self.assertEqual(data["h"], 16)
         self.assertEqual(data["i"], float("inf"))
         self.assertIsNone(data["n"])
@@ -547,47 +752,37 @@ class YamlSubsetTest(unittest.TestCase):
 
     def test_ambiguous_and_invalid_scalars_are_errors(self):
         for bad in ("a: yes\n", "a: off\n", "a: 012\n", "a: 0o17\n", "a: 2026-11-05\n", "a: 1e3\n",
-                    "a: x: y\n", "a: `x`\n", "a: 1:20\n"):
+                    "a: x: y\n", "a: `x`\n", "a: 1:20\n", "{a: 0o17}\n", "{yes: 1}\n",
+                    "a: Use when:\tfirmware\n", "a: Use when\x00\n", "a: " + "9" * 5000 + "\n"):
+            with self.subTest(bad=bad[:40]), self.assertRaises(self.vs.YamlSyntaxError):
+                self.vs.load_yaml(bad)
+
+    def test_merge_and_duplicate_keys(self):
+        merged = self.vs.load_yaml("base: &b\n  a: 1\n  b: 2\nchild:\n  <<: *b\n  b: 3\n")
+        self.assertEqual(merged["child"], {"a": 1, "b": 3})
+        for bad in ("name: a\nname: b\n", "base: &b {a: 1}\nchild: {<<: *b, x: 1, x: 2}\n",
+                    "a:\n\tb: 1\n", "*undef: v\n"):
             with self.subTest(bad=bad), self.assertRaises(self.vs.YamlSyntaxError):
-                self.vs.parse_yaml_subset(bad)
-
-    def test_error_classes(self):
-        for unsupported in ("a: {x: 1}\n", "a: &anchor x\n", "*alias: v\n", "a: |2\n  x\n", "a: x\n  continued\n"):
-            with self.subTest(unsupported=unsupported), self.assertRaises(self.vs.YamlUnsupported):
-                self.vs.parse_yaml_subset(unsupported)
-        for syntax in ("a: 1\na: 2\n", "a:\n\tb: 1\n", "key:value\n"):
-            with self.subTest(syntax=syntax), self.assertRaises(self.vs.YamlSyntaxError):
-                self.vs.parse_yaml_subset(syntax)
-
-    def test_load_yaml_never_masks_syntax_errors(self):
-        with self.assertRaises(self.vs.YamlSyntaxError):
-            self.vs.load_yaml("name: a\nname: b\n")
-
-    def test_rejects_unsupported(self):
-        for bad in ("a: {x: 1}\n", "a: &anchor x\n", "a:\n\tb: 1\n", "a: 1\na: 2\n", "key:value\n"):
-            with self.subTest(bad=bad), self.assertRaises(self.vs.YamlSubsetError):
-                self.vs.parse_yaml_subset(bad)
+                self.vs.load_yaml(bad)
 
     def test_flow_sequences(self):
-        data = self.vs.parse_yaml_subset('a: [x, "y z", \'w\']\nb: []\nc: [1, true]  # note\n')
+        data = self.vs.load_yaml('a: [x, "y z", \'w\',]\nb: []\nc: [1, true]  # note\n')
         self.assertEqual(data, {"a": ["x", "y z", "w"], "b": [], "c": [1, True]})
-        for bad in ("a: [x, [y]]\n", "a: [x,, y]\n", "a: [x] tail\n", "a: [x\n"):
-            with self.subTest(bad=bad), self.assertRaises(self.vs.YamlSubsetError):
-                self.vs.parse_yaml_subset(bad)
+        for bad in ("a: [x,, y]\n", "a: [x] tail\n", "a: [x\n"):
+            with self.subTest(bad=bad), self.assertRaises(self.vs.YamlSyntaxError):
+                self.vs.load_yaml(bad)
 
-    def test_rules_and_profiles_parse_without_pyyaml(self):
-        # 子集解析器必须独立解析全部规则与 profile 文件（没有 PyYAML 的环境不得静默退化）
+    def test_rules_and_profiles_parse(self):
         for path in [SKILL / "standards" / "rules.yaml", *sorted((SKILL / "profiles").glob("*.yaml"))]:
             with self.subTest(path=path.name):
-                self.assertIsInstance(self.vs.parse_yaml_subset(path.read_text(encoding="utf-8")), dict)
+                self.assertIsInstance(self.vs.load_yaml(path.read_text(encoding="utf-8")), dict)
 
     def test_real_frontmatter(self):
         raw, _body, _end = self.vs.split_frontmatter((SKILL / "SKILL.md").read_text(encoding="utf-8"))
-        meta = self.vs.parse_yaml_subset(raw)
+        meta = self.vs.load_yaml(raw)
         self.assertEqual(meta["name"], "embedded-engineering")
         self.assertIn("Use when", meta["description"])
         self.assertNotIn("\n", meta["description"].split("嵌入式")[0])
-
 
 if __name__ == "__main__":
     unittest.main()

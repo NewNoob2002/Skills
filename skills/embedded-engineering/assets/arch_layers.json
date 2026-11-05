@@ -1,5 +1,5 @@
 {
-  "_comment": "MCU 分层依赖规则，供 scripts/arch_lint.py 使用。layers 按顺序匹配，第一个匹配的 glob 决定文件所属层。allow：可被包含的层。forbid_includes：禁止包含的头文件模式（fnmatch，同时匹配 #include 路径与其 basename；@name 引用 include_sets）。forbid_code：禁止出现的代码模式（引用 code_patterns）。shared：任何层都可包含的公共目录。osal：RTOS 原语的包装（如 os_mutex.hpp），只允许 app 使用；module 通过模板参数或 interface 获得锁。",
+  "_comment": "MCU 分层依赖规则，供 scripts/arch_lint.py 使用。layers 按顺序匹配，第一个匹配的 glob 决定文件所属层。allow：可被包含的层。forbid_includes：禁止包含的头文件模式（fnmatch，同时匹配 #include 路径与其 basename；@name 引用 include_sets；除非 include 的每个解析结果都属于当前层 allow 的层，否则均按 forbid_includes 检查，shared 目录不豁免禁止头）。forbid_code：禁止出现的代码模式（引用 code_patterns）。shared：任何层都可包含的公共目录（不豁免 forbid_includes）。osal：RTOS 原语的包装（如 os_mutex.hpp），只允许 app 使用；module 通过模板参数或 interface 获得锁。",
   "exclude": ["build/**", "tests/**", "test/**", "vendor/**", "**/.git/**"],
   "shared": ["common/**", "util/**", "utils/**", "lib/**"],
   "layers": [

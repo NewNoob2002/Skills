@@ -222,8 +222,8 @@ def lint(root, config):
             include = match.group(2).strip()
             line = no_comments.count("\n", 0, match.start()) + 1
             targets = resolve_include(include, rel, all_files, by_basename)
+            target_layers = []
             if targets:
-                target_layers = []
                 for target in targets:
                     if glob_match(target, shared):
                         target_layers.append(None)
@@ -244,7 +244,8 @@ def lint(root, config):
                             if dst != src:
                                 graph.setdefault(src, set()).add(dst)
                     graph.setdefault(src, set())
-            else:
+            # 除非每个解析结果都位于当前层显式允许的层（shared 不算），否则都要检查禁止头模式
+            if not (targets and all(t in layer["allow"] for t in target_layers)):
                 base = PurePosixPath(include).name
                 hit = next((p for p in forbidden
                             if fnmatch.fnmatch(include, p) or fnmatch.fnmatch(base, p)), None)
@@ -253,7 +254,6 @@ def lint(root, config):
                         "file": rel, "line": line, "kind": "forbidden_include",
                         "detail": f'{layer["name"]} must not include "{include}" (matches {hit})',
                     })
-
         if layer.get("forbid_code"):
             code = strip_comments_and_strings(text)
             for ref in layer["forbid_code"]:

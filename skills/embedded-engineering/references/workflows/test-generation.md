@@ -15,7 +15,7 @@
 
 ## 步骤
 
-1. 从需求中提取可观测的行为：正常路径、参数错误、依赖错误、边界、超时、恢复（`TEST-002`）。
+1. 从需求中提取可观测的行为：正常路径、参数错误、依赖错误、边界、超时、恢复（`TEST-002`、`TEST-006`）。
 2. 为每个期望值找来源：规格、数据手册、标准测试向量。不得运行实现、再把它的输出当作期望值。
 3. 选择接缝：C 用 CMock（[verification/ceedling.md](../verification/ceedling.md) §4）；C++ 优先编译期 Fake（`TEST-003`，[verification/cpp-testing.md](../verification/cpp-testing.md) §3）。
 4. 编写用例：一个用例只测一个行为，用例名描述该行为。

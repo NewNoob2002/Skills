@@ -5,9 +5,9 @@
   python3 tools/validate_skill.py [SKILL_DIR ...] [--doc FILE ...] [--config FILE | --no-config] [--json]
 
 不带参数时检查 skills/ 下每个含 SKILL.md 的目录，以及仓库根的 README.md。
-状态：PASS；FAIL（有 error 级发现）；NOT_RUN（前提不存在，如没有该文件或没有 PyYAML）；
+状态：PASS；FAIL（有 error 级发现）；NOT_RUN（前提不存在，如没有该文件或缺少外部工具）；
 BLOCKED（依赖的检查失败而无法执行）。NOT_RUN 与 BLOCKED 都不是通过。
-退出码：0 没有 FAIL；1 至少一项 FAIL；2 用法或配置错误。只用标准库；PyYAML 存在时额外解析 YAML 资产。
+退出码：0 没有 FAIL；1 至少一项 FAIL；2 用法、配置或环境错误（如缺少 PyYAML）。依赖标准库与 PyYAML。
 
 检查项（规则依据 https://agentskills.io/specification 与 Codex agents/openai.yaml 文档）：
   frontmatter  name/description/compatibility/metadata 约束，name 与目录同名，SKILL.md 行数预算
@@ -18,7 +18,7 @@ BLOCKED（依赖的检查失败而无法执行）。NOT_RUN 与 BLOCKED 都不�
   orphans      scripts/、assets/ 下每个顶层条目都在技能文档中被提到
   scripts      带 shebang 的脚本可执行；Python 可编译；shell 通过 -n 语法检查
   data-json    *.json 可解析
-  data-yaml    *.yml/*.yaml/.clang-format/.clang-tidy 可解析（需要 PyYAML，否则 NOT_RUN）
+  data-yaml    *.yml/*.yaml/.clang-format/.clang-tidy 可解析
   openai-yaml  agents/openai.yaml 字段、图标路径、颜色格式
   rules        standards/rules.yaml 结构、ID 唯一、profile/来源/工具已声明、ref 章节存在、冲突双向登记；
                文档中以反引号引用的 Rule ID 必须存在
@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -38,6 +39,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    import yaml  # type: ignore[import-not-found]
+except ImportError:
+    yaml = None  # type: ignore[assignment]
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = Path(__file__).resolve().with_name("validate_skill.json")
 
@@ -103,33 +108,16 @@ class Check:
                 "findings": [f.__dict__ for f in self.findings]}
 
 
-# --------------------------------------------------------------------------- YAML 子集
+# --------------------------------------------------------------------------- YAML 加载（基于 PyYAML）
 
-class YamlSubsetError(ValueError):
-    """子集解析失败的基类。"""
+class YamlSyntaxError(ValueError):
+    """确定的 YAML 错误：语法错误、重复键、超长整数，或 YAML 1.1/1.2 读法不同的未加引号标量。"""
 
-
-class YamlUnsupported(YamlSubsetError):
-    """合法 YAML 可能用到、但子集没有实现的写法；可以交给 PyYAML。"""
-
-
-class YamlSyntaxError(YamlSubsetError):
-    """确定的错误：重复键、tab 缩进、非法 plain scalar、YAML 1.1/1.2 读法不同的写法。不退回 PyYAML。"""
+    def __init__(self, message: str, lineno: int | None = None):
+        super().__init__(message)
+        self.lineno = lineno
 
 
-_PLAIN_KEY = r"[^\s:#'\"\-?,\[\]{}&*!|>%@`][^:#]*?|-[^\s:#][^:#]*?"
-_KEY_RE = re.compile(r"""^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|""" + _PLAIN_KEY + r""")\s*:(?:\s+(.*))?$""")
-_BLOCK_HEADER_RE = re.compile(r"^([|>])([-+]?)([1-9]?)([-+]?)$")
-
-# YAML 1.2 core schema
-_NULL_RE = re.compile(r"^(?:~|null|Null|NULL)$")
-_BOOL_RE = re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$")
-_INT_RE = re.compile(r"^[-+]?[0-9]+$")
-_OCT_RE = re.compile(r"^0o[0-7]+$")
-_HEX_RE = re.compile(r"^0x[0-9a-fA-F]+$")
-_FLOAT_RE = re.compile(r"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$")
-_INF_RE = re.compile(r"^[-+]?\.(?:inf|Inf|INF)$")
-_NAN_RE = re.compile(r"^\.(?:nan|NaN|NAN)$")
 # YAML 1.1（PyYAML 等）与 1.2（多数 JS/Go/Rust 解析器）读法不同的 plain scalar：必须加引号
 _AMBIGUOUS_RES = (
     # 1.1 布尔；单字母 y/n 不计入：PyYAML 与 1.2 解析器都读作字符串，计入会让单字母键全部报错
@@ -142,304 +130,113 @@ _AMBIGUOUS_RES = (
     re.compile(r"^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt ].*)?$"),              # 1.1 时间戳
     re.compile(r"^[-+]?[0-9]+[eE][-+]?[0-9]+$"),                              # 1.2 浮点，1.1 为字符串
 )
-_RESERVED_START = "%@`,]}|>"
 
 
-def _plain_scalar(s: str, lineno: int):
-    if ": " in s or s.endswith(":") or s.startswith(("- ", "? ", ": ")) or s in ("-", "?"):
-        raise YamlSyntaxError(f"line {lineno}: plain scalar {s[:40]!r} contains a YAML indicator; quote it")
-    if s[0] in _RESERVED_START:
-        raise YamlSyntaxError(f"line {lineno}: plain scalar cannot start with {s[0]!r}; quote it")
-    for pattern in _AMBIGUOUS_RES:
-        if pattern.match(s):
-            raise YamlSyntaxError(f"line {lineno}: {s!r} is read differently by YAML 1.1 and 1.2 parsers; quote it")
-    if _NULL_RE.match(s):
-        return None
-    if _BOOL_RE.match(s):
-        return s.lower() == "true"
-    if _INT_RE.match(s):
-        return int(s)
-    if _OCT_RE.match(s):
-        return int(s[2:], 8)
-    if _HEX_RE.match(s):
-        return int(s[2:], 16)
-    if _FLOAT_RE.match(s):
-        return float(s)
-    if _INF_RE.match(s):
-        return float("-inf") if s.startswith("-") else float("inf")
-    if _NAN_RE.match(s):
-        return float("nan")
-    return s
+def _check_ambiguous_scalars(node, seen: set[int] | None = None) -> None:
+    if node is None:
+        return
+    if seen is None:
+        seen = set()
+    if id(node) in seen:
+        return
+    seen.add(id(node))
+    if isinstance(node, yaml.ScalarNode):
+        if node.style is None or node.style == "":
+            for pattern in _AMBIGUOUS_RES:
+                if pattern.match(node.value):
+                    lineno = node.start_mark.line + 1
+                    raise YamlSyntaxError(
+                        f"line {lineno}: {node.value!r} is read differently by YAML 1.1 and 1.2 parsers; quote it",
+                        lineno=lineno,
+                    )
+    elif isinstance(node, yaml.SequenceNode):
+        for child in node.value:
+            _check_ambiguous_scalars(child, seen)
+    elif isinstance(node, yaml.MappingNode):
+        for key_node, val_node in node.value:
+            _check_ambiguous_scalars(key_node, seen)
+            _check_ambiguous_scalars(val_node, seen)
 
 
-def _yaml_scalar(raw: str, lineno: int):
-    s = raw.strip()
-    if not s or s.startswith("#"):
-        return None
-    if s[0] == "[":
-        return _yaml_flow_list(s, lineno)
-    if s[0] in "{&*!":
-        raise YamlUnsupported(f"line {lineno}: unsupported construct {s[:12]!r}")
-    if s[0] == '"':
-        try:
-            value, end = json.JSONDecoder().raw_decode(s)
-        except json.JSONDecodeError as exc:
-            # YAML 双引号的部分转义（\x、\U 等）JSON 不支持，交给 PyYAML 判断
-            raise YamlUnsupported(f"line {lineno}: double-quoted scalar not decodable as JSON ({exc.msg})") from None
-        tail = s[end:].strip()
-        if tail and not tail.startswith("#"):
-            raise YamlSyntaxError(f"line {lineno}: trailing text after quoted scalar")
-        return value
-    if s[0] == "'":
-        m = re.match(r"'((?:[^']|'')*)'\s*(?:#.*)?$", s)
-        if not m:
-            raise YamlUnsupported(f"line {lineno}: single-quoted scalar spans lines or is malformed")
-        return m.group(1).replace("''", "'")
-    return _plain_scalar(re.split(r"\s+#", s, maxsplit=1)[0].rstrip(), lineno)
+def _make_strict_loader():
+    """拒绝同一映射内的重复显式键，同时保留 SafeLoader 对 merge key（<<）展开和显式覆盖的语义。"""
 
+    base_loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
-_FLOW_ITEM_RE = re.compile(r"""\s*("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^,\[\]{}"'#]*?)\s*(,|\])""")
+    class StrictLoader(base_loader):
+        def construct_object(self, node, deep=False):
+            try:
+                return super().construct_object(node, deep=deep)
+            except ValueError as exc:
+                raise yaml.constructor.ConstructorError(
+                    None, None, str(exc), getattr(node, "start_mark", None)
+                ) from None
 
-
-def _yaml_flow_list(s: str, lineno: int) -> list:
-    """单行流式列表，元素只能是标量：[a, "b c", 'd']。嵌套与跨行交给 PyYAML。"""
-    out: list = []
-    pos = 1
-    if re.fullmatch(r"\[\s*\](?:\s+#.*)?", s):
-        return out
-    while True:
-        m = _FLOW_ITEM_RE.match(s, pos)
-        if not m:
-            raise YamlUnsupported(f"line {lineno}: unsupported flow sequence {s[:40]!r}")
-        item = m.group(1)
-        if not item:
-            raise YamlSyntaxError(f"line {lineno}: empty item in flow sequence")
-        out.append(_yaml_scalar(item, lineno))
-        pos = m.end()
-        if m.group(2) == "]":
-            tail = s[pos:].strip()
-            if tail and not tail.startswith("#"):
-                raise YamlSyntaxError(f"line {lineno}: trailing text after flow sequence")
-            return out
-
-
-def _fold(lines: list[str]) -> str:
-    """YAML 折叠块：普通行之间的换行变空格；空行保留为换行；更深缩进的行前后保留换行。"""
-    lead = 0
-    while lead < len(lines) and lines[lead] == "":
-        lead += 1
-    rest = lines[lead:]
-    if not rest:
-        return "\n" * lead
-    out = rest[0]
-    i = 1
-    while i < len(rest):
-        j = i
-        while j < len(rest) and rest[j] == "":
-            j += 1
-        empties = j - i
-        prev, nxt = rest[i - 1], rest[j]
-        if prev.startswith((" ", "\t")) or nxt.startswith((" ", "\t")):
-            sep = "\n" * (empties + 1)
-        elif empties:
-            sep = "\n" * empties
-        else:
-            sep = " "
-        out += sep + nxt
-        i = j + 1
-    return "\n" * lead + out
-
-
-def parse_yaml_subset(text: str):
-    """解析 frontmatter、openai.yaml、rules.yaml、profiles 用到的 YAML 子集。
-
-    支持：嵌套映射、YAML 1.2 core 标量、块标量（| > 与 strip/clip/keep）、块列表、单行标量流式列表。
-    不支持锚点、别名、标签、流式映射、跨行 plain scalar、多文档：抛 YamlUnsupported，由调用方交给 PyYAML。
-    确定的错误抛 YamlSyntaxError。
-    """
-    lines = text.splitlines()
-
-    def indent_of(line: str) -> int:
-        if "\t" in line[: len(line) - len(line.lstrip())]:
-            raise YamlSyntaxError("tab indentation is not allowed in YAML")
-        return len(line) - len(line.lstrip(" "))
-
-    def skip_blank(i: int) -> int:
-        while i < len(lines) and (not lines[i].strip() or lines[i].lstrip().startswith("#")):
-            i += 1
-        return i
-
-    def block_scalar(i: int, parent_indent: int, header: str, lineno: int):
-        m = _BLOCK_HEADER_RE.match(header)
-        if not m or (m.group(2) and m.group(4)):
-            raise YamlSyntaxError(f"line {lineno}: bad block scalar header {header!r}")
-        if m.group(3):
-            raise YamlUnsupported(f"line {lineno}: block indentation indicator is not supported")
-        style, chomp = m.group(1), m.group(2) or m.group(4)
-        body: list[str] = []
-        block_indent = None
-        while i < len(lines):
-            line = lines[i]
-            if not line.strip():
-                body.append("")
-                i += 1
-                continue
-            ind = indent_of(line)
-            if ind <= parent_indent or (block_indent is not None and ind < block_indent):
-                break
-            if block_indent is None:
-                block_indent = ind
-            body.append(line[block_indent:])
-            i += 1
-        trailing = 0
-        while body and body[-1] == "":
-            body.pop()
-            trailing += 1
-        if not body:
-            return ("\n" * trailing if chomp == "+" else ""), i
-        value = "\n".join(body) if style == "|" else _fold(body)
-        if chomp == "-":
-            return value, i
-        if chomp == "+":
-            return value + "\n" + "\n" * trailing, i
-        return value + "\n", i
-
-    def parse_node(i: int):
-        line = lines[i]
-        stripped = line.strip()
-        if stripped == "-" or stripped.startswith("- "):
-            return parse_list(i, indent_of(line))
-        return parse_map(i, indent_of(line))
-
-    def parse_value(rest: str, i: int, indent: int):
-        """rest 是 “key:” 之后的文本；i 是该键所在行。"""
-        bare = "" if rest.lstrip().startswith("#") else re.split(r"\s+#", rest, maxsplit=1)[0].strip()
-        if bare and bare[0] in "|>":
-            return block_scalar(i + 1, indent, bare, i + 1)
-        if bare:
-            return _yaml_scalar(rest, i + 1), i + 1
-        j = skip_blank(i + 1)
-        if j < len(lines):
-            nxt = lines[j]
-            ind = indent_of(nxt)
-            if ind > indent:
-                return parse_node(j)
-            if ind == indent and (nxt.strip() == "-" or nxt.strip().startswith("- ")):
-                return parse_list(j, indent)
-        return None, i + 1
-
-    def parse_key(raw_key: str, lineno: int):
-        if raw_key[0] in "\"'":
-            return _yaml_scalar(raw_key, lineno)
-        return _plain_scalar(raw_key.strip(), lineno)
-
-    def parse_map(i: int, indent: int):
-        out: dict = {}
-        while True:
-            i = skip_blank(i)
-            if i >= len(lines):
-                return out, i
-            line = lines[i]
-            ind = indent_of(line)
-            content = line.strip()
-            if ind < indent or (ind == indent and (content == "-" or content.startswith("- "))):
-                return out, i
-            if ind > indent:
-                # 可能是跨行 plain scalar 的续行（合法 YAML），子集不支持
-                raise YamlUnsupported(f"line {i + 1}: continuation or unexpected indentation")
-            if content in ("---", "...") or content[0] in "?{[&*!":
-                raise YamlUnsupported(f"line {i + 1}: unsupported construct {content[:12]!r}")
-            m = _KEY_RE.match(content)
-            if not m:
-                raise YamlSyntaxError(f"line {i + 1}: expected 'key: value'")
-            key = parse_key(m.group(1), i + 1)
-            if isinstance(key, (dict, list)):
-                raise YamlUnsupported(f"line {i + 1}: complex mapping key")
-            if key in out:
-                raise YamlSyntaxError(f"line {i + 1}: duplicate key {key!r}")
-            out[key], i = parse_value(m.group(2) or "", i, indent)
-
-    def parse_list(i: int, indent: int):
-        out: list = []
-        while True:
-            i = skip_blank(i)
-            if i >= len(lines):
-                return out, i
-            line = lines[i]
-            ind = indent_of(line)
-            content = line.strip()
-            if ind != indent or not (content == "-" or content.startswith("- ")):
-                if ind > indent:
-                    raise YamlUnsupported(f"line {i + 1}: continuation or unexpected indentation")
-                return out, i
-            item = content[1:].strip()
-            if not item:
-                j = skip_blank(i + 1)
-                if j < len(lines) and indent_of(lines[j]) > indent:
-                    value, i = parse_node(j)
+        def flatten_mapping(self, node):
+            explicit = []
+            seen_merge = False
+            for key_node, _ in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":
+                    if seen_merge:
+                        raise yaml.constructor.ConstructorError(
+                            None, None, "duplicate key '<<'", key_node.start_mark
+                        )
+                    seen_merge = True
                 else:
-                    value, i = None, i + 1
-            elif _KEY_RE.match(item):
-                # “- key: value”：把该行改写成缩进 +2 的映射行，后续同级键自然接上
-                lines[i] = " " * (indent + 2) + item
-                value, i = parse_map(i, indent + 2)
-            elif item[0] in "|>":
-                value, i = block_scalar(i + 1, indent, item.split(" #")[0].strip(), i + 1)
-            else:
-                value, i = _yaml_scalar(item, i + 1), i + 1
-            out.append(value)
+                    explicit.append(key_node)
+            super().flatten_mapping(node)
+            keys = []
+            for key_node in explicit:
+                key = self.construct_object(key_node, deep=True)
+                if key in keys:
+                    raise yaml.constructor.ConstructorError(
+                        None, None, f"duplicate key {key!r}", key_node.start_mark
+                    )
+                keys.append(key)
 
-    start = skip_blank(0)
-    if start >= len(lines):
-        return None
-    value, end = parse_node(start)
-    end = skip_blank(end)
-    if end < len(lines):
-        raise YamlSyntaxError(f"line {end + 1}: unexpected content")
-    return value
+    return StrictLoader
 
 
-def _strict_pyyaml_load(yaml, text: str, all_documents: bool = False):
-    """PyYAML 默认对重复键“后者覆盖”，会掩盖错误；这里改为拒绝重复键。"""
+def _yaml_syntax_error(exc: Exception, text: str) -> YamlSyntaxError:
+    mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+    if mark is not None:
+        lineno = mark.line + 1
+    elif (pos := getattr(exc, "position", None)) is not None:
+        lineno = text.count("\n", 0, pos) + 1
+    else:
+        lineno = 1
+    return YamlSyntaxError(f"line {lineno}: {exc}", lineno=lineno)
 
-    class StrictLoader(yaml.SafeLoader):
-        pass
 
-    def construct_mapping(loader, node, deep=False):
-        keys = []
-        for key_node, _value in node.value:
-            key = loader.construct_object(key_node, deep=deep)
-            if key in keys:
-                raise yaml.constructor.ConstructorError(None, None, f"duplicate key {key!r}", key_node.start_mark)
-            keys.append(key)
-        return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
-
-    StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping)
-    if all_documents:
-        return list(yaml.load_all(text, Loader=StrictLoader))  # noqa: S506 - 派生自 SafeLoader
-    return yaml.load(text, Loader=StrictLoader)  # noqa: S506 - StrictLoader 派生自 SafeLoader
+def _strict_pyyaml_load(text: str, all_documents: bool = False):
+    if yaml is None:
+        raise RuntimeError("PyYAML is required")
+    loader_cls = _make_strict_loader()
+    try:
+        if all_documents:
+            return list(yaml.load_all(text, Loader=loader_cls))  # noqa: S506 - 派生自 SafeLoader
+        return yaml.load(text, Loader=loader_cls)  # noqa: S506 - 派生自 SafeLoader
+    except (yaml.YAMLError, ValueError) as exc:
+        raise _yaml_syntax_error(exc, text) from None
 
 
 def load_yaml(text: str):
-    """先用子集解析器；只有子集不支持的写法才交给 PyYAML（若已安装）。
-
-    YamlSyntaxError 不退回 PyYAML：PyYAML 的“重复键后者覆盖”和 YAML 1.1 读法会把错误变成通过。
-    没有 PyYAML 时 YamlUnsupported 原样抛出，调用方应报告 NOT_RUN（能力不足），而不是“非法 YAML”。
-    """
+    """用 PyYAML 解析单文档 YAML，拒绝 YAML 1.1/1.2 歧义 plain 标量与重复键。"""
+    if yaml is None:
+        raise RuntimeError("PyYAML is required")
+    loader_cls = _make_strict_loader()
     try:
-        return parse_yaml_subset(text)
-    except YamlUnsupported as unsupported:
+        loader = loader_cls(text)
         try:
-            import yaml  # type: ignore[import-not-found]
-        except ImportError:
-            # 注意：这里的裸 raise 会重新抛出 ImportError，必须显式抛出原来的 YamlUnsupported
-            raise unsupported from None
-        try:
-            return _strict_pyyaml_load(yaml, text)
-        except yaml.YAMLError as yexc:
-            raise YamlSyntaxError(str(yexc)) from None
-
-
+            root = loader.get_single_node()
+            _check_ambiguous_scalars(root)
+            return None if root is None else loader.construct_document(root)
+        finally:
+            loader.dispose()
+    except YamlSyntaxError:
+        raise
+    except (yaml.YAMLError, ValueError) as exc:
+        raise _yaml_syntax_error(exc, text) from None
 def sorted_keys(keys) -> list:
     """YAML 键可能混有 int/str/None，排序时统一按 str 比较，避免 TypeError。"""
     return sorted(keys, key=lambda k: (type(k).__name__, str(k)))
@@ -450,16 +247,18 @@ def sorted_keys(keys) -> list:
 FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
 CODE_SPAN_RE = re.compile(r"`[^`\n]+`")
 LINK_RE = re.compile(r"!?\[(?:[^\]\\]|\\.)*\]\(\s*<?([^)\s>]+)>?(?:\s+[\"'][^)]*[\"'])?\s*\)")
-# 引用式链接：定义 [label]: target；使用 [text][label] 与 [label][]
+# 引用式链接：定义 [label]: target；使用 [text][label]、[label][] 与已定义时的 [label] 简写
 REF_DEF_RE = re.compile(r"^ {0,3}\[([^\]]+)\]:\s*<?([^\s>]+)>?(?:\s+.*)?$")
 REF_FULL_RE = re.compile(r"!?\[((?:[^\]\\]|\\.)*)\]\[([^\]]*)\]")
+REF_SHORT_RE = re.compile(r"!?\[((?:[^\]\\]|\\.)+)\](?!\(|\[)")
 SECTION_HEADING_RE = re.compile(r"^#{1,6}\s+(\d+)(?=[.、:：)）\s]|$)")
 _FILE_REF = (r"(?:\[[^\]]*\]\(([^)\s#]+\.md)(?:#[^)]*)?\)"
              r"|`([^`\s]+\.md)`"
-             r"|(?<![\w/.-])((?:[\w.-]+/)*[\w-]+\.md))")
+             r"|(?<![\w/.-])((?:[\w.-]+/)*[\w-]+\.md)"
+             r"|\[((?:[^\]\\]|\\.)*)\]\[([^\]]*)\]"
+             r"|\[((?:[^\]\\]|\\.)+)\](?!\(|\[))")
 # 文件引用与 § 之间允许少量连接词（“[x](a.md) 的 §2”）
 SECTION_REF_RE = re.compile(_FILE_REF + r"?\s*(?:的|中的|中|里的|里)?\s*(§\d+(?:\s*(?:[、,，/–—~-]|和|与|及|至)\s*§?\d+)*)")
-# § 前紧挨着一个不是 .md 引用的 ASCII 词（如旧文件名 “cpp-coding §6”）：无法确定归属
 AMBIGUOUS_SECTION_PREFIX_RE = re.compile(r"[A-Za-z0-9_./`-]*[A-Za-z_./`-][A-Za-z0-9_./`-]*\s*(?:的|中的|中|里的|里)?\s*$")
 URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
@@ -523,24 +322,7 @@ class RefContext:
     external_paths: set[str]
 
 
-def check_links(md: Path, text: str, ctx: RefContext, check: Check, linked: set[Path] | None = None) -> None:
-    rel = str(md.relative_to(ctx.rel_base))
-
-    def verify(target: str, no: int) -> None:
-        if is_external(target):
-            return
-        path_part = target.split("#", 1)[0]
-        if not path_part:
-            return
-        dest = md.parent / path_part
-        if not dest.exists():
-            check.error(rel, no, f"broken link: {target}")
-        elif ctx.confine is not None and not inside(dest, ctx.confine):
-            check.error(rel, no, f"link escapes skill directory: {target}")
-        elif linked is not None:
-            linked.add(dest.resolve())
-
-    lines = list(prose_lines(text))
+def _collect_ref_defs(lines: list[tuple[int, str]]) -> tuple[dict[str, str], set[int]]:
     definitions: dict[str, str] = {}
     def_lines: set[int] = set()
     for no, line in lines:
@@ -548,19 +330,59 @@ def check_links(md: Path, text: str, ctx: RefContext, check: Check, linked: set[
         if m:
             definitions.setdefault(normalize_label(m.group(1)), m.group(2))
             def_lines.add(no)
-            verify(m.group(2), no)
+    return definitions, def_lines
+
+
+def check_links(md: Path, text: str, ctx: RefContext, check: Check, linked: set[Path] | None = None) -> None:
+    rel = str(md.relative_to(ctx.rel_base))
+
+    def verify(target: str, no: int, record_reachability: bool) -> Path | None:
+        if is_external(target):
+            return None
+        path_part = target.split("#", 1)[0]
+        if not path_part:
+            return None
+        dest = md.parent / path_part
+        if not dest.exists():
+            check.error(rel, no, f"broken link: {target}")
+            return None
+        if ctx.confine is not None and not inside(dest, ctx.confine):
+            check.error(rel, no, f"link escapes skill directory: {target}")
+            return None
+        resolved = dest.resolve()
+        if record_reachability and linked is not None:
+            linked.add(resolved)
+        return resolved
+
+    lines = list(prose_lines(text))
+    definitions, def_lines = _collect_ref_defs(lines)
+    valid_defs: dict[str, Path] = {}
+    for no, line in lines:
+        m = REF_DEF_RE.match(line)
+        if m:
+            label = normalize_label(m.group(1))
+            resolved = verify(m.group(2), no, record_reachability=False)
+            if resolved is not None and label not in valid_defs:
+                valid_defs[label] = resolved
     for no, line in lines:
         if no in def_lines:
             continue
         scan = blank_code_spans(line)
         for m in LINK_RE.finditer(scan):
-            verify(m.group(1), no)
+            verify(m.group(1), no, record_reachability=True)
         scan = LINK_RE.sub(lambda m: " " * len(m.group(0)), scan)
         for m in REF_FULL_RE.finditer(scan):
             label = normalize_label(m.group(2) or m.group(1))
             if label not in definitions:
                 check.error(rel, no, f"undefined link reference: [{m.group(2) or m.group(1)}]")
-        # 简写形式 [label] 只有在已定义时才是链接，其目标已在定义处校验；未定义的是普通方括号文字
+            elif linked is not None and label in valid_defs:
+                linked.add(valid_defs[label])
+        scan = REF_FULL_RE.sub(lambda m: " " * len(m.group(0)), scan)
+        # 简写形式 [label] 只有在已定义时才是链接；实际被使用时才计入可达集合
+        for m in REF_SHORT_RE.finditer(scan):
+            label = normalize_label(m.group(1))
+            if linked is not None and label in valid_defs:
+                linked.add(valid_defs[label])
 
 
 def check_paths(md: Path, text: str, ctx: RefContext, check: Check) -> None:
@@ -568,19 +390,21 @@ def check_paths(md: Path, text: str, ctx: RefContext, check: Check) -> None:
     for no, line in prose_lines(text):
         for span in CODE_SPAN_RE.finditer(line):
             for token in span.group(0)[1:-1].split():
-                if "/" not in token or any(c in token for c in "<>*?[]{}$|=:"):
+                if "/" not in token or token.startswith("/") or any(c in token for c in "<>*?[]{}$|=:"):
                     continue
-                norm = token[2:] if token.startswith("./") else token
+                norm = posixpath.normpath(token)
+                if norm == ".":
+                    continue
                 # 外部源码树中的路径（如 Linux 的 ./scripts/checkpatch.pl）必须登记在 external_paths
-                if norm.rstrip("/") in ctx.external_paths:
+                if norm in ctx.external_paths:
                     continue
-                if norm.startswith("../"):
+                if norm == ".." or norm.startswith("../"):
                     if ctx.confine is not None:
                         check.error(rel, no, f"path escapes skill directory: {token}")
                     continue
                 head = norm.split("/", 1)[0]
                 if not head:
-                    continue  # 绝对路径或斜杠命令
+                    continue
                 candidates: list[Path] = []
                 if ctx.local_dirs and (md.parent / head).is_dir():
                     candidates = [md.parent]
@@ -588,7 +412,9 @@ def check_paths(md: Path, text: str, ctx: RefContext, check: Check) -> None:
                     candidates = ctx.skill_roots
                 else:
                     continue
-                if not any((base / norm).exists() for base in candidates):
+                if ctx.confine is not None and any(not inside(base / norm, ctx.confine) for base in candidates):
+                    check.error(rel, no, f"path escapes skill directory: {token}")
+                elif not any((base / norm).exists() for base in candidates):
                     check.error(rel, no, f"path not found: {token}")
 
 
@@ -613,9 +439,28 @@ def check_sections(md: Path, text: str, ctx: RefContext, check: Check, cache: di
             cache[key] = None if body is None else section_numbers(body)
         return cache[key]
 
-    for no, line in prose_lines(text):
+    lines = list(prose_lines(text))
+    definitions, def_lines = _collect_ref_defs(lines)
+    for no, line in lines:
+        if no in def_lines:
+            continue
         for m in SECTION_REF_RE.finditer(line):
             name = m.group(1) or m.group(2) or m.group(3)
+            if name is None and m.group(4) is not None:
+                raw_label = m.group(5) or m.group(4)
+                target_str = definitions.get(normalize_label(raw_label), "")
+                name = target_str.split("#", 1)[0] or f"[{raw_label}]"
+            elif name is None and m.group(6) is not None:
+                raw_label = m.group(6)
+                label = normalize_label(raw_label)
+                if label in definitions:
+                    name = definitions[label].split("#", 1)[0] or f"[{raw_label}]"
+                elif raw_label.endswith(".md"):
+                    name = raw_label
+                else:
+                    check.error(rel, no, f"ambiguous § reference after '[{raw_label}]': name the file as a .md link "
+                                         "or path, or drop the word")
+                    continue
             if name:
                 target = resolve_md(md, name, ctx)
                 if target is None:
@@ -632,27 +477,24 @@ def check_sections(md: Path, text: str, ctx: RefContext, check: Check, cache: di
             if have is None:
                 check.error(rel, no, f"cannot read {target.name} to resolve §")
                 continue
-            for num in map(int, re.findall(r"\d+", m.group(4))):
+            for num in map(int, re.findall(r"\d+", m.group(7))):
                 if num not in have:
                     if name:
                         check.error(rel, no, f"§{num} not found in {name} (headings: {sorted(have)})")
                     else:
                         check.error(rel, no, f"§{num} not found in this file (headings: {sorted(have)}); "
                                              "a reference to another file must name it as a .md link or path")
-
-
 # --------------------------------------------------------------------------- 技能检查
 
 def split_frontmatter(text: str):
-    """分隔符必须是第 0 列的 '---'；块标量里缩进的 '---' 不是结束符。"""
-    lines = text.splitlines()
-    if not lines or lines[0].rstrip() != "---":
+    """分隔符必须是第 0 列的 '---'；块标量里缩进的 '---' 不是结束符。保留原始行结束符。"""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].rstrip("\r\n").rstrip() != "---":
         return None, None, 0
     for idx in range(1, len(lines)):
-        if lines[idx].rstrip() == "---":
-            return "\n".join(lines[1:idx]), "\n".join(lines[idx + 1:]), idx + 1
+        if lines[idx].rstrip("\r\n").rstrip() == "---":
+            return "".join(lines[1:idx]), "".join(lines[idx + 1:]), idx + 1
     return None, None, 0
-
 
 def check_frontmatter(skill: Path, cfg: dict, check: Check) -> dict | None:
     entry = skill / "SKILL.md"
@@ -669,9 +511,6 @@ def check_frontmatter(skill: Path, cfg: dict, check: Check) -> dict | None:
         return None
     try:
         meta = load_yaml(raw)
-    except YamlUnsupported as exc:
-        check.not_run = f"frontmatter uses YAML outside the built-in subset and PyYAML is not installed ({exc})"
-        return None
     except YamlSyntaxError as exc:
         check.error("SKILL.md", None, f"frontmatter is not valid YAML: {exc}")
         return None
@@ -809,22 +648,15 @@ def check_yaml_assets(skill: Path, check: Check) -> None:
                    and p.resolve() not in owned)
     if not files:
         return
-    try:
-        import yaml  # type: ignore[import-not-found]
-    except ImportError:
-        check.not_run = f"PyYAML not installed; {len(files)} YAML files not parsed"
-        return
     for path in files:
         body = read_text_or_none(path)
         if body is None:
             check.error(str(path.relative_to(skill)), None, "not readable UTF-8")
             continue
         try:
-            _strict_pyyaml_load(yaml, body, all_documents=True)
-        except yaml.YAMLError as exc:
-            mark = getattr(exc, "problem_mark", None)
-            check.error(str(path.relative_to(skill)), mark.line + 1 if mark else None, f"invalid YAML: {exc}")
-
+            _strict_pyyaml_load(body, all_documents=True)
+        except YamlSyntaxError as exc:
+            check.error(str(path.relative_to(skill)), exc.lineno, f"invalid YAML: {exc}")
 
 def check_openai_yaml(skill: Path, check: Check) -> None:
     path = skill / "agents" / "openai.yaml"
@@ -837,9 +669,6 @@ def check_openai_yaml(skill: Path, check: Check) -> None:
         return
     try:
         data = load_yaml(body)
-    except YamlUnsupported as exc:
-        check.not_run = f"uses YAML outside the built-in subset and PyYAML is not installed ({exc})"
-        return
     except YamlSyntaxError as exc:
         check.error(rel, None, f"cannot parse: {exc}")
         return
@@ -903,6 +732,8 @@ RULE_OPTIONAL = ("when", "except", "cost", "conflicts")
 RULE_LEVELS = {"mandatory", "advisory"}
 RULE_LANGS = {"c", "cpp"}
 VERIFY_METHODS = {"auto", "review", "test", "measure"}
+VERIFY_KEYS = {"method", "tool", "check", "coverage", "gap"}
+VERIFY_COVERAGES = {"full", "partial"}
 RULES_TOP_KEYS = {"version", "profiles", "sources", "verify_tools", "rules"}
 TOOL_KEYS = {"path", "external", "checks"}
 PROFILE_REQUIRED = ("id", "summary", "evidence", "coding", "architecture", "references", "tests", "gates")
@@ -910,7 +741,7 @@ REF_RE = re.compile(r"^(\S+?)(?:\s+(§\d+(?:\s*(?:[、,，/–—~-]|和|与|及
 
 
 def _str_list(value) -> bool:
-    return isinstance(value, list) and bool(value) and all(isinstance(v, str) and v for v in value)
+    return isinstance(value, list) and bool(value) and all(isinstance(v, str) and bool(v.strip()) for v in value)
 
 
 def _check_ref(skill: Path, rel: str, where: str, ref: str, check: Check, cache: dict[Path, set[int]]) -> None:
@@ -936,21 +767,18 @@ def _check_ref(skill: Path, rel: str, where: str, ref: str, check: Check, cache:
                 check.error(rel, None, f"{where}: §{num} not found in {m.group(1)}")
 
 
-def load_rules(skill: Path) -> tuple[dict | None, str | None, str | None]:
-    """返回 (数据, 错误, 未执行原因)。"""
+def load_rules(skill: Path) -> tuple[bool, object, str | None]:
+    """返回 (文件是否存在, 解析数据, 解析错误)。"""
     path = skill / RULES_FILE
     if not path.is_file():
-        return None, None, None
+        return False, None, None
     body = read_text_or_none(path)
     if body is None:
-        return None, "not readable UTF-8", None
+        return True, None, "not readable UTF-8"
     try:
-        return load_yaml(body), None, None
-    except YamlUnsupported as exc:
-        return None, None, f"uses YAML outside the built-in subset and PyYAML is not installed ({exc})"
+        return True, load_yaml(body), None
     except YamlSyntaxError as exc:
-        return None, f"cannot parse: {exc}", None
-
+        return True, None, f"cannot parse: {exc}"
 
 CITED_RULE_RE = re.compile(r"`([A-Z]{1,5}-\d{3})`")
 
@@ -965,13 +793,10 @@ def check_cited_rules(docs: dict[Path, str], skill: Path, known: set[str], check
                     check.error(rel, no, f"cites unknown rule {m.group(1)}")
 
 
-def check_rules(skill: Path, data: dict | None, parse_error: str | None, not_run: str | None,
+def check_rules(skill: Path, exists: bool, data: object, parse_error: str | None,
                 check: Check, docs: dict[Path, str] | None = None) -> None:
     rel = str(RULES_FILE)
-    if not_run:
-        check.not_run = not_run
-        return
-    if data is None and parse_error is None:
+    if not exists:
         check.not_run = f"no {rel}"
         return
     if parse_error:
@@ -998,18 +823,28 @@ def check_rules(skill: Path, data: dict | None, parse_error: str | None, not_run
     tool_text: dict[str, str] = {}
     for name, spec in tools.items():
         where = f"verify_tools.{name}"
+        if not isinstance(name, str) or not name.strip():
+            check.error(rel, None, f"verify_tools key {name!r} must be a non-empty string")
+            continue
         if not isinstance(spec, dict) or set(spec) - TOOL_KEYS:
             check.error(rel, None, f"{where}: must be a mapping of {sorted(TOOL_KEYS)}")
             continue
         if ("path" in spec) == ("external" in spec):
             check.error(rel, None, f"{where}: give exactly one of path / external")
             continue
+        if "external" in spec and not (isinstance(spec["external"], str) and spec["external"].strip()):
+            check.error(rel, None, f"{where}.external must be a non-empty string")
         if "path" in spec:
-            target = skill / str(spec["path"])
-            if not target.is_file() or not inside(target, skill):
-                check.error(rel, None, f"{where}: path not found in skill: {spec['path']}")
-            elif target.suffix in (".md", "") or target.name.startswith("."):
-                tool_text[name] = target.read_text(encoding="utf-8")
+            if not (isinstance(spec["path"], str) and spec["path"].strip()):
+                check.error(rel, None, f"{where}.path must be a non-empty string")
+            else:
+                target = skill / spec["path"]
+                if not target.is_file() or not inside(target, skill):
+                    check.error(rel, None, f"{where}: path not found in skill: {spec['path']}")
+                elif target.suffix in (".md", "") or target.name.startswith("."):
+                    body = read_text_or_none(target)
+                    if body is not None:
+                        tool_text[name] = body
         if "checks" in spec:
             if not _str_list(spec["checks"]):
                 check.error(rel, None, f"{where}.checks must be a non-empty list of strings")
@@ -1017,7 +852,6 @@ def check_rules(skill: Path, data: dict | None, parse_error: str | None, not_run
                 tool_checks[name] = set(spec["checks"])
         else:
             tool_checks[name] = None
-
     rules = data.get("rules")
     if not isinstance(rules, list) or not rules:
         check.error(rel, None, "rules must be a non-empty list")
@@ -1044,7 +878,7 @@ def check_rules(skill: Path, data: dict | None, parse_error: str | None, not_run
         for key in ("title", "when", "except", "cost"):
             if key in rule and not (isinstance(rule[key], str) and rule[key].strip()):
                 check.error(rel, None, f"{where}: {key} must be a non-empty string")
-        if "level" in rule and rule["level"] not in RULE_LEVELS:
+        if "level" in rule and (not isinstance(rule["level"], str) or rule["level"] not in RULE_LEVELS):
             check.error(rel, None, f"{where}: level must be one of {sorted(RULE_LEVELS)}")
         rp = rule.get("profiles")
         if "profiles" in rule:
@@ -1075,56 +909,90 @@ def check_rules(skill: Path, data: dict | None, parse_error: str | None, not_run
                     _check_ref(skill, rel, where, ref, check, cache)
         verify = rule.get("verify")
         if "verify" in rule:
-            if not isinstance(verify, dict) or set(verify) - {"method", "tool", "check"}:
-                check.error(rel, None, f"{where}: verify must be a mapping of method/tool/check")
+            if not isinstance(verify, dict) or set(verify) - VERIFY_KEYS:
+                check.error(rel, None, f"{where}: verify must be a mapping of {sorted(VERIFY_KEYS)}")
             else:
-                method, tool = verify.get("method"), verify.get("tool")
-                if method not in VERIFY_METHODS:
+                method = verify.get("method")
+                tool = verify.get("tool")
+                coverage = verify.get("coverage")
+                gap = verify.get("gap")
+                valid_tool = isinstance(tool, str) and bool(tool.strip())
+                if not isinstance(method, str) or method not in VERIFY_METHODS:
                     check.error(rel, None, f"{where}: verify.method must be one of {sorted(VERIFY_METHODS)}")
-                if method == "auto" and not tool:
-                    check.error(rel, None, f"{where}: verify.method auto requires verify.tool")
-                if tool is not None and tool not in tools:
-                    check.error(rel, None, f"{where}: undeclared verify.tool {tool!r}")
-                elif tool is not None and "check" in verify:
-                    allowed = tool_checks.get(tool)
-                    item = str(verify["check"])
-                    if allowed is not None and item not in allowed:
-                        check.error(rel, None, f"{where}: {tool} has no check {item!r} (declared: {sorted(allowed)})")
-                    elif allowed is None and tool in tool_text and item not in tool_text[tool]:
-                        check.error(rel, None, f"{where}: {item!r} does not appear in {tools[tool].get('path')}")
-                elif "check" in verify and tool is None:
-                    check.error(rel, None, f"{where}: verify.check requires verify.tool")
+                if method == "auto":
+                    if not valid_tool:
+                        check.error(rel, None, f"{where}: verify.method auto requires verify.tool")
+                    if "coverage" not in verify:
+                        check.error(rel, None, f"{where}: verify.method auto requires verify.coverage")
+                    elif not isinstance(coverage, str) or coverage not in VERIFY_COVERAGES:
+                        check.error(rel, None,
+                                    f"{where}: verify.coverage must be one of {sorted(VERIFY_COVERAGES)}")
+                    elif coverage == "partial":
+                        if not (isinstance(gap, str) and gap.strip()):
+                            check.error(rel, None, f"{where}: verify.coverage partial requires non-empty verify.gap")
+                    elif "gap" in verify:
+                        check.error(rel, None, f"{where}: verify.gap is only allowed when verify.coverage is partial")
+                else:
+                    if "coverage" in verify:
+                        check.error(rel, None, f"{where}: verify.coverage is only allowed when verify.method is auto")
+                    if "gap" in verify:
+                        check.error(rel, None, f"{where}: verify.gap is only allowed when verify.coverage is partial")
+                if "tool" in verify:
+                    if not valid_tool:
+                        check.error(rel, None, f"{where}: verify.tool must be a non-empty string")
+                    elif tool not in tools:
+                        check.error(rel, None, f"{where}: undeclared verify.tool {tool!r}")
+                if "check" in verify:
+                    item = verify["check"]
+                    if not (isinstance(item, str) and item.strip()):
+                        check.error(rel, None, f"{where}: verify.check must be a non-empty string")
+                    elif not valid_tool:
+                        check.error(rel, None, f"{where}: verify.check requires verify.tool")
+                    elif tool in tools:
+                        allowed = tool_checks.get(tool)
+                        if allowed is not None:
+                            if item not in allowed:
+                                check.error(rel, None,
+                                            f"{where}: {tool} has no check {item!r} (declared: {sorted(allowed)})")
+                        elif tool in tool_text:
+                            if item not in tool_text[tool]:
+                                check.error(rel, None,
+                                            f"{where}: {item!r} does not appear in {tools[tool].get('path')}")
+                        else:
+                            check.error(rel, None,
+                                        f"{where}: {tool} does not declare checks and is not a text file; "
+                                        "omit verify.check")
         if "conflicts" in rule and not _str_list(rule["conflicts"]):
             check.error(rel, None, f"{where}: conflicts must be a non-empty list of rule ids")
 
     if docs is not None:
         check_cited_rules(docs, skill, set(seen), check)
     for rid, rule in seen.items():
-        for other in rule.get("conflicts") or []:
-            if not isinstance(other, str):
-                continue
+        conflicts = rule.get("conflicts")
+        if not _str_list(conflicts):
+            continue
+        for other in conflicts:
             if other == rid:
                 check.error(rel, None, f"{rid}: conflicts with itself")
             elif other not in seen:
                 check.error(rel, None, f"{rid}: conflicts with unknown rule {other}")
-            elif rid not in (seen[other].get("conflicts") or []):
-                check.error(rel, None, f"{rid}: conflict with {other} is not listed on {other}")
+            else:
+                other_conflicts = seen[other].get("conflicts")
+                if not _str_list(other_conflicts) or rid not in other_conflicts:
+                    check.error(rel, None, f"{rid}: conflict with {other} is not listed on {other}")
 
 
-def check_profiles(skill: Path, data: dict | None, rules_error: str | None, rules_not_run: str | None,
+def check_profiles(skill: Path, exists: bool, data: object, rules_error: str | None,
                    check: Check) -> None:
     pdir = skill / "profiles"
-    if rules_error is not None or (data is not None and not isinstance(data, dict)):
-        check.blocked = "standards/rules.yaml is invalid (see rules)"
-        return
-    if rules_not_run is not None:
-        check.blocked = "standards/rules.yaml was not parsed (see rules)"
-        return
-    if not isinstance(data, dict):
+    if not exists:
         if pdir.is_dir():
             check.error("profiles/", None, "profiles/ exists but standards/rules.yaml is missing")
         else:
             check.not_run = "no standards/rules.yaml"
+        return
+    if rules_error is not None or not isinstance(data, dict):
+        check.blocked = "standards/rules.yaml is invalid (see rules)"
         return
     declared = data.get("profiles") if _str_list(data.get("profiles")) else []
     tools = data.get("verify_tools") if isinstance(data.get("verify_tools"), dict) else {}
@@ -1145,9 +1013,6 @@ def check_profiles(skill: Path, data: dict | None, rules_error: str | None, rule
             continue
         try:
             prof = load_yaml(body)
-        except YamlUnsupported as exc:
-            check.not_run = f"{rel} uses YAML outside the built-in subset and PyYAML is not installed ({exc})"
-            continue
         except YamlSyntaxError as exc:
             check.error(rel, None, f"cannot parse: {exc}")
             continue
@@ -1161,18 +1026,25 @@ def check_profiles(skill: Path, data: dict | None, rules_error: str | None, rule
             check.error(rel, None, f"unknown key {key}")
         if prof.get("id") != stem:
             check.error(rel, None, f"id {prof.get('id')!r} does not match file name")
+        for key in ("summary", "evidence", "architecture"):
+            if key in prof and not (isinstance(prof[key], str) and prof[key].strip()):
+                check.error(rel, None, f"{key} must be a non-empty string")
         refs = prof.get("references")
         if "references" in prof:
             if not _str_list(refs):
                 check.error(rel, None, "references must be a non-empty list")
             else:
                 for ref in refs:
-                    if not (skill / ref).is_file():
+                    target = skill / ref
+                    if not target.is_file():
                         check.error(rel, None, f"reference not found: {ref}")
+                    elif not inside(target, skill):
+                        check.error(rel, None, f"reference is outside the skill directory: {ref}")
         for key in ("coding", "tests"):
             val = prof.get(key)
             if key in prof and not (isinstance(val, dict) and val
-                                    and all(isinstance(v, str) and v for v in val.values())):
+                                    and all(isinstance(k, str) and k.strip() and isinstance(v, str) and v.strip()
+                                            for k, v in val.items())):
                 check.error(rel, None, f"{key} must be a non-empty mapping of strings")
         gates = prof.get("gates")
         if "gates" in prof:
@@ -1182,9 +1054,14 @@ def check_profiles(skill: Path, data: dict | None, rules_error: str | None, rule
                 for idx, gate in enumerate(gates):
                     if not isinstance(gate, dict) or set(gate) != {"tool", "run"}:
                         check.error(rel, None, f"gates[{idx}] must have exactly tool and run")
-                    elif gate["tool"] not in tools:
-                        check.error(rel, None, f"gates[{idx}]: tool {gate['tool']!r} not in verify_tools")
-
+                        continue
+                    gtool, grun = gate["tool"], gate["run"]
+                    if not (isinstance(gtool, str) and gtool.strip()):
+                        check.error(rel, None, f"gates[{idx}].tool must be a non-empty string")
+                    elif gtool not in tools:
+                        check.error(rel, None, f"gates[{idx}]: tool {gtool!r} not in verify_tools")
+                    if not (isinstance(grun, str) and grun.strip()):
+                        check.error(rel, None, f"gates[{idx}].run must be a non-empty string")
 
 def is_hygiene_violation(path: Path) -> bool:
     if path.is_dir() and not path.is_symlink():
@@ -1216,14 +1093,22 @@ def check_hygiene(skill: Path, cfg: dict, check: Check) -> None:
                 check.error(rel, None, "Markdown file is not UTF-8")
 
 
+def _run_check(check: Check, default_file: str, fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - 单个检查未预期异常不得中断整体报告
+        check.error(default_file, None, f"internal error: {type(exc).__name__}: {exc}")
+        return None
+
+
 def validate_skill(skill: Path, cfg: dict) -> dict:
     checks = {cid: Check(cid) for cid in ("frontmatter", "links", "paths", "sections", "reachability", "orphans",
                                           "scripts", "data-json", "data-yaml", "openai-yaml", "rules",
                                           "profiles", "hygiene")}
-    check_hygiene(skill, cfg, checks["hygiene"])
-    meta = check_frontmatter(skill, cfg, checks["frontmatter"])
+    _run_check(checks["hygiene"], skill.name, check_hygiene, skill, cfg, checks["hygiene"])
+    meta = _run_check(checks["frontmatter"], "SKILL.md", check_frontmatter, skill, cfg, checks["frontmatter"])
     ctx = RefContext(rel_base=skill, skill_roots=[skill], confine=skill, local_dirs=False,
-                     external_paths={p.rstrip("/") for p in cfg.get("external_paths", [])})
+                     external_paths={posixpath.normpath(p) for p in cfg.get("external_paths", [])})
     entry_links: set[Path] = set()
     cache: dict[Path, set[int]] = {}
     texts: list[str] = []
@@ -1234,21 +1119,27 @@ def validate_skill(skill: Path, cfg: dict) -> dict:
             continue  # hygiene 已报告
         texts.append(text)
         docs[md] = text
-        check_links(md, text, ctx, checks["links"], entry_links if md == skill / "SKILL.md" else None)
-        check_paths(md, text, ctx, checks["paths"])
-        check_sections(md, text, ctx, checks["sections"], cache)
+    _run_check(checks["links"], skill.name,
+               lambda: [check_links(md, t, ctx, checks["links"], entry_links if md == skill / "SKILL.md" else None)
+                        for md, t in docs.items()])
+    _run_check(checks["paths"], skill.name,
+               lambda: [check_paths(md, t, ctx, checks["paths"]) for md, t in docs.items()])
+    _run_check(checks["sections"], skill.name,
+               lambda: [check_sections(md, t, ctx, checks["sections"], cache) for md, t in docs.items()])
     if (skill / "SKILL.md").is_file():
-        check_reachability(skill, entry_links, checks["reachability"])
+        _run_check(checks["reachability"], "SKILL.md", check_reachability, skill, entry_links, checks["reachability"])
     else:
         checks["reachability"].not_run = "SKILL.md missing"
-    check_orphans(skill, checks["orphans"], texts)
-    check_scripts(skill, checks["scripts"])
-    check_json(skill, checks["data-json"])
-    check_yaml_assets(skill, checks["data-yaml"])
-    check_openai_yaml(skill, checks["openai-yaml"])
-    rules, rules_error, rules_not_run = load_rules(skill)
-    check_rules(skill, rules, rules_error, rules_not_run, checks["rules"], docs)
-    check_profiles(skill, rules, rules_error, rules_not_run, checks["profiles"])
+    _run_check(checks["orphans"], skill.name, check_orphans, skill, checks["orphans"], texts)
+    _run_check(checks["scripts"], "scripts/", check_scripts, skill, checks["scripts"])
+    _run_check(checks["data-json"], skill.name, check_json, skill, checks["data-json"])
+    _run_check(checks["data-yaml"], skill.name, check_yaml_assets, skill, checks["data-yaml"])
+    _run_check(checks["openai-yaml"], "agents/openai.yaml", check_openai_yaml, skill, checks["openai-yaml"])
+    rules_exists, rules_data, rules_error = load_rules(skill)
+    _run_check(checks["rules"], str(RULES_FILE), check_rules, skill, rules_exists, rules_data, rules_error,
+               checks["rules"], docs)
+    _run_check(checks["profiles"], "profiles/", check_profiles, skill, rules_exists, rules_data, rules_error,
+               checks["profiles"])
     name = meta.get("name") if isinstance(meta, dict) else None
     return {"kind": "skill", "name": name or skill.name, "path": str(skill),
             "checks": [c.to_json() for c in checks.values()]}
@@ -1261,10 +1152,12 @@ def validate_doc(doc: Path, skills: list[Path], external_paths: set[str]) -> dic
     text = read_text_or_none(doc)
     if text is None:
         checks["links"].error(doc.name, None, "not readable UTF-8")
+        checks["paths"].blocked = f"{doc.name} is not readable UTF-8 (see links)"
+        checks["sections"].blocked = f"{doc.name} is not readable UTF-8 (see links)"
         return {"kind": "doc", "name": doc.name, "path": str(doc), "checks": [c.to_json() for c in checks.values()]}
-    check_links(doc, text, ctx, checks["links"])
-    check_paths(doc, text, ctx, checks["paths"])
-    check_sections(doc, text, ctx, checks["sections"], {})
+    _run_check(checks["links"], doc.name, check_links, doc, text, ctx, checks["links"])
+    _run_check(checks["paths"], doc.name, check_paths, doc, text, ctx, checks["paths"])
+    _run_check(checks["sections"], doc.name, check_sections, doc, text, ctx, checks["sections"], {})
     return {"kind": "doc", "name": doc.name, "path": str(doc), "checks": [c.to_json() for c in checks.values()]}
 
 
@@ -1320,6 +1213,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-config", action="store_true")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     args = ap.parse_args(argv)
+    if yaml is None:
+        print("error: PyYAML is required; run: uv run --with pyyaml python3 tools/validate_skill.py",
+              file=sys.stderr)
+        return 2
 
     try:
         config = load_config(None if args.no_config else args.config)
@@ -1344,9 +1241,8 @@ def main(argv: list[str] | None = None) -> int:
     results = [validate_skill(s, config.get(s.name, {})) for s in skills]
     external = set()
     for s in skills:
-        external |= {p.rstrip("/") for p in config.get(s.name, {}).get("external_paths", [])}
+        external |= {posixpath.normpath(p) for p in config.get(s.name, {}).get("external_paths", [])}
     results += [validate_doc(d, skills, external) for d in docs]
-
     if args.json:
         print(json.dumps({"results": results, "summary": summarize(results)}, ensure_ascii=False, indent=2))
     else:

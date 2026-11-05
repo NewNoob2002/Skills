@@ -69,6 +69,22 @@ class ArchLintTest(unittest.TestCase):
             reg_lines = [v["line"] for v in report["violations"] if v["kind"] == "register_access"]
             self.assertEqual(reg_lines, [7], "comments and strings must not be flagged")
 
+
+    def test_forbidden_include_in_shared_and_same_layer_homonym(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.make_clean_repo(tmp)
+            # lib/** 属于 shared：放入真实的 FreeRTOS task.h 后，module/ 直接包含它仍必须报 forbidden_include
+            write(tmp, "lib/freertos/include/task.h", "/* FreeRTOS task.h */\n")
+            # module/ 自有的同名头文件 queue.h 被同层包含时不应误报
+            write(tmp, "module/x/queue.h", "#ifndef PROJ_QUEUE_H\n#define PROJ_QUEUE_H\n#endif\n")
+            write(tmp, "module/control/control.c", '#include "task.h"\n#include "queue.h"\n')
+            code, out, _ = run(ARCH_LINT, tmp, "--json")
+            self.assertEqual(code, 1, out)
+            violations = json.loads(out)["violations"]
+            self.assertEqual(len(violations), 1, violations)
+            self.assertEqual(violations[0]["file"], "module/control/control.c")
+            self.assertEqual(violations[0]["kind"], "forbidden_include")
+            self.assertIn("task.h", violations[0]["detail"])
     def test_cpp_templates_follow_layering(self):
         code, out, err = run(ARCH_LINT, SKILL / "assets" / "cpp" / "templates")
         self.assertEqual(code, 0, out + err)
@@ -187,14 +203,21 @@ class RulesConsistencyTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        vs = _load_module("validate_skill", SKILL.parent.parent / "tools" / "validate_skill.py")
-        cls.rules = vs.parse_yaml_subset((SKILL / "standards" / "rules.yaml").read_text(encoding="utf-8"))
-
+        import yaml
+        cls.rules = yaml.safe_load((SKILL / "standards" / "rules.yaml").read_text(encoding="utf-8"))
     def test_profiles_match_detect_profile(self):
         detect = _load_module("detect_profile", DETECT)
         detected = {rule[0] for rule in detect.NAME_RULES}
         self.assertEqual(set(self.rules["profiles"]), detected)
         self.assertEqual({p.stem for p in (SKILL / "profiles").glob("*.yaml")}, detected)
+
+    def test_compiler_flag_rules_marked_full_must_fail_the_build(self):
+        # COMPILER_FLAGS.md 没有全局 -Werror：只有 -Werror=<x> 形式的检查项才会让默认构建失败
+        for rule in self.rules["rules"]:
+            verify = rule["verify"]
+            if verify.get("tool") == "c_compiler_flags" and verify.get("coverage") == "full":
+                with self.subTest(rule=rule["id"]):
+                    self.assertTrue(str(verify.get("check", "")).startswith("-Werror="), verify)
 
     def test_arch_lint_checks_match_implementation(self):
         source = ARCH_LINT.read_text(encoding="utf-8")
@@ -208,6 +231,56 @@ class RulesConsistencyTest(unittest.TestCase):
         declared = set(self.rules["verify_tools"]["cpp_cost"]["checks"])
         # budget/diff 是 check 的 --budget 与 diff 子命令，其余是符号类别
         self.assertEqual(declared - {"budget", "diff"}, set(cost.SYMBOL_CLASSES))
+
+    def test_r2_15_test_rules_and_mcu_profile_gates(self):
+        import yaml
+        by_id = {r["id"]: r for r in self.rules["rules"]}
+        self.assertIn("mcu-", by_id["TEST-001"].get("except", ""))
+        self.assertIn("linux-userspace", by_id["TEST-001"].get("except", ""))
+        self.assertIn("补充", by_id["TEST-001"].get("except", ""))
+        self.assertEqual(by_id["TEST-002"]["lang"], ["c"])
+        self.assertEqual(by_id["TEST-002"]["verify"]["tool"], "ceedling")
+        self.assertEqual(by_id["TEST-002"]["ref"], "references/verification/ceedling.md §5")
+        self.assertIn("TEST-006", by_id)
+        self.assertEqual(by_id["TEST-006"]["lang"], ["cpp"])
+        self.assertEqual(by_id["TEST-006"]["verify"]["tool"], "cpputest")
+        for prof_name in ("mcu-baremetal.yaml", "mcu-rtos.yaml"):
+            prof = yaml.safe_load((SKILL / "profiles" / prof_name).read_text(encoding="utf-8"))
+            gate_tools = {g["tool"] for g in prof["gates"]}
+            self.assertIn("cpputest", gate_tools, prof_name)
+
+    def test_r2_16_cpp_and_zephyr_rule_levels_exceptions_and_conflicts(self):
+        by_id = {r["id"]: r for r in self.rules["rules"]}
+        self.assertEqual(by_id["CPP-007"]["level"], "mandatory")
+        cpp009_text = by_id["CPP-009"]["title"] + " " + by_id["CPP-009"].get("except", "")
+        self.assertIn("单线程", cpp009_text)
+        self.assertIn("guard", cpp009_text)
+        self.assertEqual(by_id["CPP-010"]["level"], "mandatory")
+        self.assertNotIn("constinit", by_id["CPP-010"]["title"])
+        self.assertIn("CPP-020", by_id)
+        self.assertEqual(by_id["CPP-020"]["level"], "advisory")
+        self.assertIn("constinit", by_id["CPP-020"]["title"])
+        self.assertIn("动作类函数", by_id["ZEP-005"]["title"])
+        self.assertIn("ERR_PTR", by_id["ZEP-005"].get("except", "") + by_id["ZEP-005"]["title"])
+        self.assertIn("ZEP-007", by_id["CPP-003"].get("except", ""))
+        self.assertIn("ZEP-007", by_id["CPP-003"].get("conflicts", []))
+        self.assertIn("CPP-003", by_id["ZEP-007"].get("conflicts", []))
+
+    def test_r2_17_rule_profiles_match_when_and_title(self):
+        by_id = {r["id"]: r for r in self.rules["rules"]}
+        # CFMT-007（ISR 命名）只适用于 MCU：Linux 用户态没有 ISR，不随格式层一并适用
+        mcu_only = {"CFMT-007"}
+        for rid in mcu_only:
+            self.assertNotIn("linux-userspace", by_id[rid]["profiles"], rid)
+        for rid, rule in by_id.items():
+            if rid.startswith("CFMT-") and rid not in mcu_only:
+                self.assertIn("linux-userspace", rule["profiles"], rid)
+                self.assertIn("linux-userspace", rule.get("when", ""), rid)
+                self.assertIn("BARR-C", rule.get("when", ""), rid)
+        gen008_profiles = set(by_id["GEN-008"]["profiles"])
+        self.assertTrue(gen008_profiles == {"all"}
+                        or {"mcu-baremetal", "mcu-rtos", "linux-userspace"} <= gen008_profiles)
+
 
 class WorkflowPagesTest(unittest.TestCase):
     """references/workflows/ 下每个工作流页面都有固定结构，并在 workflow.md §7 目录中登记。"""

@@ -41,7 +41,7 @@ C++ 部分不简单禁止现代特性，而是按资源等级（T0 极小 MCU �
 ```text
 skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此目录）
 ├── SKILL.md                    # 入口：护栏、profile、角色、路由
-├── standards/rules.yaml        # 121 条带 ID 的规则：适用 profile、等级、验证方法、出处章节、冲突
+├── standards/rules.yaml        # 123 条带 ID 的规则：适用 profile、等级、验证方法与覆盖范围、出处章节、冲突
 ├── profiles/*.yaml            # 每个 profile 的规范、测试基线、门禁命令（与 rules.yaml 声明一一对应）
 ├── references/                 # 按需读取的规则
 │   ├── profiles.md             #   profile 判定与冲突裁决
@@ -73,7 +73,7 @@ skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此�
 tools/validate_skill.py         # Skill 自检：frontmatter、链接/路径/§ 引用、可达性、脚本、数据文件、规则库与 profile、打包卫生
 tools/validate_skill.json       # 每个技能的自检配置（SKILL.md 行数预算、外部源码树路径白名单）
 tests/test_scripts.py           # arch_lint、detect_profile 回归测试
-tests/test_validate_skill.py    # validate_skill 变异测试（逐项注入缺陷，含 rules/profiles）与 YAML 子集解析测试
+tests/test_validate_skill.py    # validate_skill 变异测试（逐项注入缺陷，含 rules/profiles）与 YAML 解析测试
 tests/test_cpp.py               # cpp_cost、C++ 模板矩阵、CppUTest 模板
 tests/cpp/                      # C++ 模板编译与负向编译检查
 install.sh                      # 安装器
@@ -110,7 +110,7 @@ install.sh                      # 安装器
 | 项 | 结果 |
 | --- | --- |
 | `python3 tools/validate_skill.py`（技能 13 项 + README 3 项检查） | PASS |
-| `python3 -m unittest discover -s tests -v`（168 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试；见下行环境变量；未设置时 C++ 工具链相关用例跳过） | PASS |
+| `python3 -m unittest discover -s tests -v`（182 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试；见下行环境变量；未设置时 C++ 工具链相关用例跳过） | PASS |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |
 | C++ 模板 clang-format（`assets/cpp/.clang-format`）与 clang-tidy（`assets/cpp/.clang-tidy`，含头文件） | PASS |
@@ -135,8 +135,8 @@ install.sh                      # 安装器
 ## 维护
 
 - 上游版本与核实日期见 `skills/embedded-engineering/references/sources.md`；BARR-C:2026 发布后替换 `assets/barr-c/` 并更新 `references/c/barr-c.md`。
-- 修改技能内任何文件后运行 `python3 tools/validate_skill.py`（`--json` 输出机器可读结果；状态为 `PASS`/`FAIL`/`NOT_RUN`/`BLOCKED`，后两者都不是通过；退出码 0 无 FAIL、1 有 FAIL、2 用法错误）。约定：反引号中以 `scripts/`、`assets/`、`references/`、`standards/`、`profiles/`、`agents/` 开头（可带 `./`）的路径都按技能根检查；Zephyr/Linux 源码树中的同名路径（如 `./scripts/checkpatch.pl`）登记到 `tools/validate_skill.json` 的 `external_paths`。引用其他文件的章节写成 `.md` 链接或路径加 `§N`（允许“的”等连接词）；`§N` 前紧挨着非 `.md` 的英文词会报歧义。没有 PyYAML 时，内置 YAML 子集解析器不支持的写法报 `NOT_RUN`，YAML 1.1/1.2 读法不同的标量（`yes`、`012`、日期等）必须加引号。
-- 新增或修改规则：编辑 `skills/embedded-engineering/standards/rules.yaml`（ID 永不复用；`verify.method: auto` 必须给出已声明的工具；跨 profile 冲突在双方的 `conflicts` 中登记），再运行 `validate_skill.py`。工具新增检查项时同步更新 `verify_tools.<tool>.checks`，`tests/test_scripts.py` 的一致性测试会比对脚本实现。
+- 修改技能内任何文件后运行 `python3 tools/validate_skill.py`（依赖 PyYAML，缺少时可用 `uv run --with pyyaml python3 tools/validate_skill.py`；`--json` 输出机器可读结果；状态为 `PASS`/`FAIL`/`NOT_RUN`/`BLOCKED`，后两者都不是通过；退出码 0 无 FAIL、1 有 FAIL、2 用法或环境错误）。约定：反引号中以 `scripts/`、`assets/`、`references/`、`standards/`、`profiles/`、`agents/` 开头（可带 `./`）的路径都按技能根检查；Zephyr/Linux 源码树中的同名路径（如 `./scripts/checkpatch.pl`）登记到 `tools/validate_skill.json` 的 `external_paths`。引用其他文件的章节写成 `.md` 链接或路径加 `§N`（允许“的”等连接词）；`§N` 前紧挨着非 `.md` 的英文词会报歧义。YAML 1.1/1.2 读法不同的标量（`yes`、`012`、日期等）必须加引号。
+- 新增或修改规则：编辑 `skills/embedded-engineering/standards/rules.yaml`（ID 永不复用；`verify.method: auto` 必须给出已声明的工具与 `coverage: full | partial`，`partial` 必须写明 `gap`；跨 profile 冲突在双方的 `conflicts` 中登记），再运行 `validate_skill.py`。工具新增检查项时同步更新 `verify_tools.<tool>.checks`，`tests/test_scripts.py` 的一致性测试会比对脚本实现。
 - 修改脚本后运行 `python3 -m unittest discover -s tests -v`。完整运行 C++ 用例需要：
   - `arm-none-eabi-g++`（用于 cpp_cost 与模板矩阵）
   - `ETL_INCLUDE=<etl>/include`

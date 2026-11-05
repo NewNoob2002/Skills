@@ -33,4 +33,6 @@ gates:
   - tool: cpp_cost
     run: "python3 <skill>/scripts/cpp_cost.py check <elf> --tier <Tn>（含 C++ 时）"
   - tool: ceedling
-    run: "ceedling test:all"
+    run: "ceedling test:all（含 C 时）"
+  - tool: cpputest
+    run: "ctest --test-dir build-host --output-on-failure（含 C++ 时）"

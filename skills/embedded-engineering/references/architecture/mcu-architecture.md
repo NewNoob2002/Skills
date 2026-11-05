@@ -45,8 +45,8 @@ project/
 - `bsp/`、`driver/bus/` 包含 `interface/` 头是为了**实现**契约（依赖倒置），不是反向依赖。
 - `app/` 是组合根，可以包含 bsp 头以取得接口实例，但不得调用 HAL。
 - 模块间依赖只经公共头，禁止循环依赖。
+- 禁止头检查（`forbid_includes`）：除非 `#include` 的每个解析结果都位于当前层允许依赖的层（`common/`、`lib/` 等 `shared` 目录不算允许的层），否则均按禁止头模式检查；因此即使 RTOS/厂商头放在 `lib/` 下仍会被检出，而同层自有的同名头文件（如 `module/x/queue.h`）不会误报。
 - RTOS：任务创建在 `app/`；任务函数调用 module API。module 需要同步原语时，通过 `interface/osal_if.h` 之类的 OS 抽象，而不是直接包含 `FreeRTOS.h`。
-
 ```text
 TASK (app) → MODULE API → INTERFACE → BUS/DEVICE DRIVER → PLATFORM
 ```
