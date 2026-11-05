@@ -109,7 +109,7 @@ install.sh                      # 安装器
 | 项 | 结果 |
 | --- | --- |
 | `python3 tools/validate_skill.py`（技能 13 项 + README 3 项检查） | PASS |
-| `python3 -m unittest discover -s tests -v`（105 个用例，含规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试；见下行环境变量；未设置时 C++ 工具链相关用例跳过） | PASS |
+| `python3 -m unittest discover -s tests -v`（164 个用例，含审查发现回归用例、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试；见下行环境变量；未设置时 C++ 工具链相关用例跳过） | PASS |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |
 | C++ 模板 clang-format（`assets/cpp/.clang-format`）与 clang-tidy（`assets/cpp/.clang-tidy`，含头文件） | PASS |
@@ -132,7 +132,7 @@ install.sh                      # 安装器
 ## 维护
 
 - 上游版本与核实日期见 `skills/embedded-engineering/references/sources.md`；BARR-C:2026 发布后替换 `assets/barr-c/` 并更新 `references/c/barr-c.md`。
-- 修改技能内任何文件后运行 `python3 tools/validate_skill.py`（`--json` 输出机器可读结果；退出码 0 无 FAIL、1 有 FAIL、2 用法错误）。约定：反引号中相对技能根的路径不加 `./`；`./` 开头的视为外部源码树路径（如 `./scripts/checkpatch.pl`），不检查；不带 `./` 的外部路径登记到 `tools/validate_skill.json` 的 `external_paths`。引用其他文件的章节时写成 `.md` 链接或路径加 `§N`。
+- 修改技能内任何文件后运行 `python3 tools/validate_skill.py`（`--json` 输出机器可读结果；状态为 `PASS`/`FAIL`/`NOT_RUN`/`BLOCKED`，后两者都不是通过；退出码 0 无 FAIL、1 有 FAIL、2 用法错误）。约定：反引号中以 `scripts/`、`assets/`、`references/`、`standards/`、`profiles/`、`agents/` 开头（可带 `./`）的路径都按技能根检查；Zephyr/Linux 源码树中的同名路径（如 `./scripts/checkpatch.pl`）登记到 `tools/validate_skill.json` 的 `external_paths`。引用其他文件的章节写成 `.md` 链接或路径加 `§N`（允许“的”等连接词）；`§N` 前紧挨着非 `.md` 的英文词会报歧义。没有 PyYAML 时，内置 YAML 子集解析器不支持的写法报 `NOT_RUN`，YAML 1.1/1.2 读法不同的标量（`yes`、`012`、日期等）必须加引号。
 - 新增或修改规则：编辑 `skills/embedded-engineering/standards/rules.yaml`（ID 永不复用；`verify.method: auto` 必须给出已声明的工具；跨 profile 冲突在双方的 `conflicts` 中登记），再运行 `validate_skill.py`。工具新增检查项时同步更新 `verify_tools.<tool>.checks`，`tests/test_scripts.py` 的一致性测试会比对脚本实现。
 - 修改脚本后运行 `python3 -m unittest discover -s tests -v`。完整运行 C++ 用例需要：
   - `arm-none-eabi-g++`（用于 cpp_cost 与模板矩阵）

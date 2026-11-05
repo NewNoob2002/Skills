@@ -20,9 +20,11 @@ CONFIG = ROOT / "tools" / "validate_skill.json"
 SKILL = ROOT / "skills" / "embedded-engineering"
 
 
-def run_tool(*args):
-    proc = subprocess.run([sys.executable, "-I", str(TOOL), *map(str, args)],
-                          capture_output=True, text=True, check=False)
+def run_tool(*args, env=None, no_site=False):
+    # no_site：用 -S 屏蔽 site-packages，确定性地模拟“没有 PyYAML”的环境
+    flags = ["-I", "-S"] if no_site else ["-I"]
+    proc = subprocess.run([sys.executable, *flags, str(TOOL), *map(str, args)],
+                          capture_output=True, text=True, check=False, env=env)
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -81,9 +83,9 @@ class MutationTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def statuses(self, skill=None, expect_exit=None):
+    def statuses(self, skill=None, expect_exit=None, env=None, no_site=False):
         skill = skill or self.skill
-        code, out, err = run_tool("--json", "--config", CONFIG, skill)
+        code, out, err = run_tool("--json", "--config", CONFIG, skill, env=env, no_site=no_site)
         self.assertIn(code, (0, 1), err)
         if expect_exit is not None:
             self.assertEqual(code, expect_exit, out)
@@ -178,9 +180,16 @@ class MutationTest(unittest.TestCase):
         self.assertIn("§42", msgs[0])
 
     def test_stale_bare_name_section_ref(self):
-        # P0 遗漏过的写法：不带 .md 的旧文件名 + §N，被当作本文件章节而报错
-        append(self.skill / "references" / "cpp" / "features.md", "\n见 cpp-coding §9。\n")
+        # P0 遗漏过的写法：不带 .md 的旧文件名 + §N。features.md 自己就有 §3，
+        # 旧实现会把它算到当前文件而漏报；现在必须报“归属不明”
+        append(self.skill / "references" / "cpp" / "features.md", "\n见 cpp-coding §3。\n")
         self.assert_only_fails("sections")
+        self.assertTrue(any("ambiguous" in m for m in self.messages("sections")))
+
+    def test_section_ref_with_connector_word(self):
+        # “[x](a.md) 的 §9”：中间的连接词不应让归属丢失（coding.md 有 §9，features.md 没有）
+        append(self.skill / "references" / "cpp" / "features.md", "\n见 [cpp/coding.md](coding.md) 的 §9。\n")
+        self.assertEqual(self.statuses(expect_exit=0), self.baseline)
 
     def test_unlinked_reference(self):
         (self.skill / "references" / "orphan.md").write_text("# orphan\n", encoding="utf-8")
@@ -200,9 +209,19 @@ class MutationTest(unittest.TestCase):
         got = self.statuses(expect_exit=0)
         self.assertEqual(got, self.baseline)
 
-    def test_dot_slash_paths_are_external(self):
+    def test_whitelisted_external_path_passes(self):
         append(self.skill / "references" / "profiles.md", "\n内核树中运行 `./scripts/checkpatch.pl --strict`。\n")
         self.assertEqual(self.statuses(expect_exit=0), self.baseline)
+
+    def test_dot_slash_skill_path_is_checked(self):
+        # 回归：曾把所有 ./ 路径视为外部而放过技能自身的坏路径
+        append(self.skill / "references" / "profiles.md", "\n运行 `./scripts/nope.py`。\n")
+        self.assert_only_fails("paths")
+
+    def test_parent_path_escaping_skill(self):
+        append(self.skill / "references" / "profiles.md", "\n见 `../references/nope.md`。\n")
+        self.assert_only_fails("paths")
+        self.assertTrue(any("escapes" in m for m in self.messages("paths")))
 
     # -- 脚本与数据
 
@@ -248,6 +267,126 @@ class MutationTest(unittest.TestCase):
         got = self.statuses(expect_exit=1)
         self.assertEqual(got["hygiene"], "FAIL")
 
+
+class ReviewRegressionTest(MutationTest):
+    """P0/P1 审查发现（2026-11-05，omp + GPT-6.1-Sol · Codex）的回归用例，编号对应审查报告。"""
+
+    def entry(self):
+        return self.skill / "SKILL.md"
+
+    def set_frontmatter(self, body):
+        text = self.entry().read_text(encoding="utf-8")
+        rest = text.split("\n---\n", 1)[1]
+        # 不能 rstrip：keep chomping 用例依赖结束符前的空行
+        body = body if body.endswith("\n") else body + "\n"
+        self.entry().write_text("---\n" + body + "---\n" + rest, encoding="utf-8")
+
+    def test_01_indented_delimiter_does_not_end_frontmatter(self):
+        self.set_frontmatter("name: embedded-engineering\ndescription: |-\n  Use when x\n  ---\n  " + "x" * 1024)
+        self.assert_only_fails("frontmatter")
+        self.assertTrue(any("1024" in m for m in self.messages("frontmatter")))
+
+    def test_02_keep_chomping_counts_trailing_newlines(self):
+        self.set_frontmatter("name: embedded-engineering\ndescription: |+\n  Use when " + "x" * 1014 + "\n\n\n")
+        self.assert_only_fails("frontmatter")
+
+    def test_02_folded_more_indented_keeps_newline(self):
+        self.set_frontmatter("name: embedded-engineering\ndescription: >-\n  Use when " + "x" * 1012 + "\n    y")
+        self.assert_only_fails("frontmatter")
+
+    def test_03_colon_space_in_plain_scalar_is_invalid(self):
+        self.set_frontmatter("name: embedded-engineering\ndescription: Use when: firmware")
+        self.assert_only_fails("frontmatter")
+        self.assertTrue(any("quote it" in m for m in self.messages("frontmatter")))
+
+    def test_03_integer_metadata_key_and_hex_value(self):
+        self.set_frontmatter("name: embedded-engineering\ndescription: Use when testing\nmetadata:\n"
+                             "  123: quoted\n  version: 0x10")
+        self.assert_only_fails("frontmatter")
+        self.assertEqual(len([m for m in self.messages("frontmatter") if "metadata." in m]), 2)
+
+    def test_04_duplicate_name_in_frontmatter(self):
+        self.set_frontmatter("name: embedded-engineering\nname: embedded-engineering\ndescription: Use when x")
+        self.assert_only_fails("frontmatter")
+
+    def test_04_root_flow_mapping_is_not_misparsed(self):
+        self.set_frontmatter("{name: embedded-engineering, description: Use when testing}")
+        got = self.statuses()
+        # 以被测进程的能力为准（基线 data-yaml 为 NOT_RUN 即该进程没有 PyYAML），而不是测试进程
+        if self.baseline["data-yaml"] == "NOT_RUN":
+            self.assertEqual(got["frontmatter"], "NOT_RUN")
+        else:
+            self.assertEqual(got["frontmatter"], "PASS", self.messages("frontmatter"))
+
+    def test_04_unsupported_yaml_without_pyyaml_is_not_run(self):
+        # 回归：load_yaml 在没有 PyYAML 时曾因裸 raise 抛出 ImportError 而崩溃
+        self.set_frontmatter("{name: embedded-engineering, description: Use when testing}")
+        got = self.statuses(no_site=True)
+        self.assertEqual(got["frontmatter"], "NOT_RUN")
+        self.assertEqual(got["data-yaml"], "NOT_RUN")
+
+    def test_04_flow_mapping_metadata_without_pyyaml(self):
+        self.set_frontmatter('name: embedded-engineering\ndescription: Use when testing\nmetadata: {author: "qa"}')
+        got = self.statuses(no_site=True)
+        self.assertEqual(got["frontmatter"], "NOT_RUN")  # 能力不足，不是“非法 YAML”
+
+    def test_04_heterogeneous_keys_do_not_crash(self):
+        self.set_frontmatter("name: embedded-engineering\ndescription: Use when testing\n0: zero\nother: value")
+        self.assert_only_fails("frontmatter")
+        msgs = " ".join(self.messages("frontmatter"))
+        self.assertIn("must be a string", msgs)
+        self.assertIn("unknown frontmatter field: other", msgs)
+
+    def test_04_comment_before_nested_mapping(self):
+        self.set_frontmatter('name: embedded-engineering\ndescription: Use when testing\n'
+                             'metadata: # release metadata\n  version: "1"')
+        self.assertEqual(self.statuses(expect_exit=0), self.baseline)
+
+    def test_05_explicit_null_is_type_checked(self):
+        self.set_frontmatter("name: embedded-engineering\ndescription: Use when testing\n"
+                             "compatibility: null\nmetadata: null")
+        self.assert_only_fails("frontmatter")
+        self.assertEqual(len(self.messages("frontmatter")), 2)
+
+    def test_06_missing_shell_is_not_run(self):
+        env = dict(os.environ, PATH=str(self.tmp / "empty-path"))
+        got = self.statuses(env=env, expect_exit=0)
+        self.assertEqual(got["scripts"], "NOT_RUN")
+
+    def test_09_reference_style_links(self):
+        append(self.skill / "references" / "profiles.md", "\n见 [缺失][r]。\n\n[r]: missing.md\n")
+        self.assert_only_fails("links")
+
+    def test_09_undefined_reference_label(self):
+        append(self.skill / "references" / "profiles.md", "\n见 [文字][no-such-label]。\n")
+        self.assert_only_fails("links")
+
+    def test_09_reference_style_link_counts_for_reachability(self):
+        replace(self.entry(), "[profiles.md](references/profiles.md)。\n\n**项目常驻规则**",
+                "[profiles.md][profiles-route]。\n\n[profiles-route]: references/profiles.md\n\n**项目常驻规则**")
+        self.assertEqual(self.statuses(expect_exit=0), self.baseline)
+
+    def test_10_icon_outside_skill(self):
+        (self.tmp / "outside.png").write_bytes(b"\x89PNG")
+        append(self.skill / "agents" / "openai.yaml", '  icon_small: "../outside.png"\n')
+        self.assert_only_fails("openai-yaml")
+        self.assertTrue(any("outside" in m for m in self.messages("openai-yaml")))
+
+    def test_11_dependency_field_types(self):
+        append(self.skill / "agents" / "openai.yaml",
+               "dependencies:\n  tools:\n    - type:\n        nested: true\n      value: 123\n")
+        self.assert_only_fails("openai-yaml")
+        self.assertEqual(len([m for m in self.messages("openai-yaml") if "must be a non-empty string" in m]), 2)
+
+    def test_12_non_utf8_reference_does_not_crash(self):
+        (self.skill / "references" / "profiles.md").write_bytes(b"# x\n\xff\xfe broken\n")
+        got = self.statuses(expect_exit=1)  # statuses() 解析 JSON：崩溃会在这里失败
+        self.assertEqual(got["hygiene"], "FAIL")
+
+    def test_12_non_utf8_entry_does_not_crash(self):
+        self.entry().write_bytes(b"---\nname: x\n---\n\xff\n")
+        got = self.statuses(expect_exit=1)
+        self.assertEqual(got["frontmatter"], "FAIL")
 
 class RulesMutationTest(MutationTest):
     """standards/rules.yaml 与 profiles/ 的变异测试。"""
@@ -370,6 +509,54 @@ class YamlSubsetTest(unittest.TestCase):
     def test_numbers_and_quotes(self):
         data = self.vs.parse_yaml_subset("v: 1.0\nq: \"1.0\"\ns: 'it''s'\n")
         self.assertEqual(data, {"v": 1.0, "q": "1.0", "s": "it's"})
+
+    # 期望值由 PyYAML 6 计算后写死，无 PyYAML 的环境同样能比对
+    BLOCK_CASES = [
+        ("a: |+\n  x\n\n\n", "x\n\n\n"), ("a: |-\n  x\n\n", "x"), ("a: |\n  x\n\n", "x\n"),
+        ("a: >-\n  aa\n    y\n", "aa\n  y"), ("a: >\n  a\n  b\n\n  c\n", "a b\nc\n"),
+        ("a: >\n  a\n\n\n  b\n", "a\n\nb\n"), ("a: >\n  a\n    more\n  b\n", "a\n  more\nb\n"),
+        ("a: >-\n\n  a\n", "\na"), ("a: |\n  a\n   b\n", "a\n b\n"), ("a: >+\n  a\n  b\n\n", "a b\n\n"),
+        ("a: >\n  a\n    m1\n    m2\n  b\n", "a\n  m1\n  m2\nb\n"), ("a: |-\n", ""),
+        ("a: >\n  a\n\n    m\n\n  b\n", "a\n\n  m\n\nb\n"),
+    ]
+
+    def test_block_scalars_match_yaml_spec(self):
+        for text, expected in self.BLOCK_CASES:
+            with self.subTest(text=text):
+                self.assertEqual(self.vs.parse_yaml_subset(text)["a"], expected)
+        try:
+            import yaml
+        except ImportError:
+            return
+        for text, _expected in self.BLOCK_CASES:
+            with self.subTest(pyyaml=text):
+                self.assertEqual(self.vs.parse_yaml_subset(text), yaml.safe_load(text))
+
+    def test_core_schema_scalars(self):
+        data = self.vs.parse_yaml_subset("h: 0x10\ni: .inf\nn: ~\nb: TRUE\ns: plain text\n")
+        self.assertEqual(data["h"], 16)
+        self.assertEqual(data["i"], float("inf"))
+        self.assertIsNone(data["n"])
+        self.assertIs(data["b"], True)
+        self.assertEqual(data["s"], "plain text")
+
+    def test_ambiguous_and_invalid_scalars_are_errors(self):
+        for bad in ("a: yes\n", "a: off\n", "a: 012\n", "a: 0o17\n", "a: 2026-11-05\n", "a: 1e3\n",
+                    "a: x: y\n", "a: `x`\n", "a: 1:20\n"):
+            with self.subTest(bad=bad), self.assertRaises(self.vs.YamlSyntaxError):
+                self.vs.parse_yaml_subset(bad)
+
+    def test_error_classes(self):
+        for unsupported in ("a: {x: 1}\n", "a: &anchor x\n", "*alias: v\n", "a: |2\n  x\n", "a: x\n  continued\n"):
+            with self.subTest(unsupported=unsupported), self.assertRaises(self.vs.YamlUnsupported):
+                self.vs.parse_yaml_subset(unsupported)
+        for syntax in ("a: 1\na: 2\n", "a:\n\tb: 1\n", "key:value\n"):
+            with self.subTest(syntax=syntax), self.assertRaises(self.vs.YamlSyntaxError):
+                self.vs.parse_yaml_subset(syntax)
+
+    def test_load_yaml_never_masks_syntax_errors(self):
+        with self.assertRaises(self.vs.YamlSyntaxError):
+            self.vs.load_yaml("name: a\nname: b\n")
 
     def test_rejects_unsupported(self):
         for bad in ("a: {x: 1}\n", "a: &anchor x\n", "a:\n\tb: 1\n", "a: 1\na: 2\n", "key:value\n"):

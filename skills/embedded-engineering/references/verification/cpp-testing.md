@@ -9,7 +9,7 @@
 | C 模块（MCU） | Ceedling（[verification/ceedling.md](ceedling.md)） | CppUTest（与 C++ 统一时） |
 | C++ 模块（MCU） | **CppUTest** + CppUMock | GoogleTest/gMock（仅 host，项目已使用时）；Pigweed 项目用 `pw_unit_test` |
 | Zephyr 应用（C/C++） | ztest + Twister（[platforms/zephyr.md](../platforms/zephyr.md)） | 纯逻辑可额外用 CppUTest |
-| Linux 用户态 C++ | 项目既有框架 | GoogleTest / CppUTest |
+| Linux 用户态 C++ | 项目既有框架；无则 CppUTest | GoogleTest（项目已使用时） |
 
 ## 2. CppUTest 要点
 

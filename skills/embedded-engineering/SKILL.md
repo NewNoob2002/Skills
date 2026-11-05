@@ -33,11 +33,11 @@ description: >-
 | [`mcu-rtos`](profiles/mcu-rtos.yaml) | `FreeRTOSConfig.h`、`cmsis_os2.h`、RT-Thread 等 | **BARR-C:2018 全量**（C）/ C++ 规范（`.cpp`） | 分层架构 + RTOS/ISR 规则 | **Ceedling**（C）/ **CppUTest**（C++）+ 目标机构建 |
 | [`zephyr`](profiles/zephyr.yaml) | `west.yml`、`prj.conf`、`find_package(Zephyr)`、`zephyr/module.yml` | **Zephyr 官方**（Linux 风格 + 例外 + MISRA 子集） | Zephyr 设备模型/devicetree/Kconfig | **ztest + Twister** |
 | [`linux-kernel`](profiles/linux-kernel.yaml) | `Kbuild`、`obj-m`/`obj-y`、`MAINTAINERS`、DT bindings | **Linux 内核官方** coding-style + checkpatch | 内核子系统框架 | **KUnit / kselftest** + 构建告警门禁 |
-| [`linux-userspace`](profiles/linux-userspace.yaml) | 守护进程/工具、Yocto recipe、CMake/Meson 的 Linux 应用 | 项目既有规范；无则 BARR-C 安全核心（C）/ C++ 规范 T3（`.cpp`） | 平台隔离 + 进程/服务边界 | 项目既有框架；无则 Ceedling/Unity |
+| [`linux-userspace`](profiles/linux-userspace.yaml) | 守护进程/工具、Yocto recipe、CMake/Meson 的 Linux 应用 | 项目既有规范；无则 BARR-C 安全核心（C）/ C++ 规范 T3（`.cpp`） | 平台隔离 + 进程/服务边界 | 项目既有框架；无则 Ceedling/Unity（C）/ CppUTest（C++） |
 
 **规则库**：[standards/rules.yaml](standards/rules.yaml) 收录可机械检查、跨生态冲突或需要按 ID 引用的规则（`GEN`、`ARCH`、`C`、`CFMT`、`ISR`、`RTOS`、`DMA`、`CPP`、`ZEP`、`LNXK`、`LNXU`、`TEST`），每条给出适用 profile、强制等级、验证方法和出处章节。某 profile 适用的规则 = `profiles` 含该 profile 或 `all` 的条目；每个 profile 文件（上表第一列链接）列出该 profile 的规范、测试基线和门禁命令。规则细节以 `ref` 指向的 reference 为准。
 
-**语言**：`.c/.h` 按上表的 C 规范；`.cpp/.hpp` 按 [cpp/coding.md](references/cpp/coding.md)，并按资源等级 T0–T3 取舍特性（[cpp/features.md](references/cpp/features.md)）。等级由 `detect_profile.py` 的 `resource_tier` 给出建议，需对照芯片资源确认。`linux-kernel` 不引入 C++；Zephyr 只在应用层使用 C++，内核、驱动、系统初始化保持 C。C++ 测试默认用 CppUTest，C 测试仍用 Ceedling。
+**语言**：`.c/.h` 按上表的 C 规范；`.cpp/.hpp` 按 [cpp/coding.md](references/cpp/coding.md)，并按资源等级 T0–T3 取舍特性（[cpp/features.md](references/cpp/features.md)）。等级由 `detect_profile.py` 的 `resource_tier` 给出建议，需对照芯片资源确认。`linux-kernel` 不引入 C++；Zephyr 只在应用层使用 C++，内核、驱动、系统初始化保持 C。测试框架按 profile 与语言选择（见上表）：`mcu-*` 与 `linux-userspace` 的 C 用 Ceedling、C++ 用 CppUTest；`zephyr` 以 ztest + Twister 为准，只有不依赖 Zephyr API 的纯逻辑可额外做 host 测试；`linux-kernel` 用 KUnit/kselftest。
 
 **规则优先级**（高 → 低）：运行时/授权限制 → 项目显式规则（`AGENTS.md`、`CLAUDE.md`、既有 `.clang-format`、MISRA 偏离记录）→ 目标生态官方规范（Zephyr/Linux，**向上游提交时强制**）→ BARR-C → 分层架构规则 → 本工作流默认值。冲突的详细裁决见 [profiles.md](references/profiles.md)。
 

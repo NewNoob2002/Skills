@@ -58,6 +58,7 @@ OPENAI_SCHEMA = {
     "dependencies": {"tools"},
 }
 OPENAI_TOOL_KEYS = {"type", "value", "description", "transport", "url"}
+OPENAI_TOOL_TYPES = {"mcp"}  # Codex 文档示例中唯一出现的类型；其他值只提示
 CONFIG_KEYS = {"max_skill_md_lines", "max_file_bytes", "external_paths"}
 TRIGGER_HINT_RE = re.compile(r"use (?:it )?when|时使用|适用于|用于", re.IGNORECASE)
 
@@ -104,10 +105,70 @@ class Check:
 # --------------------------------------------------------------------------- YAML 子集
 
 class YamlSubsetError(ValueError):
-    pass
+    """子集解析失败的基类。"""
 
 
-_KEY_RE = re.compile(r"""^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s:#'"\-][^:#]*?|-[^\s:#][^:#]*?)\s*:(?:\s+(.*))?$""")
+class YamlUnsupported(YamlSubsetError):
+    """合法 YAML 可能用到、但子集没有实现的写法；可以交给 PyYAML。"""
+
+
+class YamlSyntaxError(YamlSubsetError):
+    """确定的错误：重复键、tab 缩进、非法 plain scalar、YAML 1.1/1.2 读法不同的写法。不退回 PyYAML。"""
+
+
+_PLAIN_KEY = r"[^\s:#'\"\-?,\[\]{}&*!|>%@`][^:#]*?|-[^\s:#][^:#]*?"
+_KEY_RE = re.compile(r"""^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|""" + _PLAIN_KEY + r""")\s*:(?:\s+(.*))?$""")
+_BLOCK_HEADER_RE = re.compile(r"^([|>])([-+]?)([1-9]?)([-+]?)$")
+
+# YAML 1.2 core schema
+_NULL_RE = re.compile(r"^(?:~|null|Null|NULL)$")
+_BOOL_RE = re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$")
+_INT_RE = re.compile(r"^[-+]?[0-9]+$")
+_OCT_RE = re.compile(r"^0o[0-7]+$")
+_HEX_RE = re.compile(r"^0x[0-9a-fA-F]+$")
+_FLOAT_RE = re.compile(r"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$")
+_INF_RE = re.compile(r"^[-+]?\.(?:inf|Inf|INF)$")
+_NAN_RE = re.compile(r"^\.(?:nan|NaN|NAN)$")
+# YAML 1.1（PyYAML 等）与 1.2（多数 JS/Go/Rust 解析器）读法不同的 plain scalar：必须加引号
+_AMBIGUOUS_RES = (
+    # 1.1 布尔；单字母 y/n 不计入：PyYAML 与 1.2 解析器都读作字符串，计入会让单字母键全部报错
+    re.compile(r"^(?:yes|Yes|YES|no|No|NO|on|On|ON|off|Off|OFF)$"),
+    re.compile(r"^[-+]?0[0-9_]+$"),                                          # 1.1 八进制 012
+    re.compile(r"^[-+]?0b[01_]+$"),                                           # 1.1 二进制
+    re.compile(r"^0o[0-7]+$"),                                                # 1.2 八进制，1.1 为字符串
+    re.compile(r"^[-+]?[0-9][0-9_]*_[0-9_]*(?:\.[0-9_]*)?$"),                 # 1.1 数字下划线
+    re.compile(r"^[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+(?:\.[0-9_]*)?$"),        # 1.1 六十进制
+    re.compile(r"^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt ].*)?$"),              # 1.1 时间戳
+    re.compile(r"^[-+]?[0-9]+[eE][-+]?[0-9]+$"),                              # 1.2 浮点，1.1 为字符串
+)
+_RESERVED_START = "%@`,]}|>"
+
+
+def _plain_scalar(s: str, lineno: int):
+    if ": " in s or s.endswith(":") or s.startswith(("- ", "? ", ": ")) or s in ("-", "?"):
+        raise YamlSyntaxError(f"line {lineno}: plain scalar {s[:40]!r} contains a YAML indicator; quote it")
+    if s[0] in _RESERVED_START:
+        raise YamlSyntaxError(f"line {lineno}: plain scalar cannot start with {s[0]!r}; quote it")
+    for pattern in _AMBIGUOUS_RES:
+        if pattern.match(s):
+            raise YamlSyntaxError(f"line {lineno}: {s!r} is read differently by YAML 1.1 and 1.2 parsers; quote it")
+    if _NULL_RE.match(s):
+        return None
+    if _BOOL_RE.match(s):
+        return s.lower() == "true"
+    if _INT_RE.match(s):
+        return int(s)
+    if _OCT_RE.match(s):
+        return int(s[2:], 8)
+    if _HEX_RE.match(s):
+        return int(s[2:], 16)
+    if _FLOAT_RE.match(s):
+        return float(s)
+    if _INF_RE.match(s):
+        return float("-inf") if s.startswith("-") else float("inf")
+    if _NAN_RE.match(s):
+        return float("nan")
+    return s
 
 
 def _yaml_scalar(raw: str, lineno: int):
@@ -116,42 +177,31 @@ def _yaml_scalar(raw: str, lineno: int):
         return None
     if s[0] == "[":
         return _yaml_flow_list(s, lineno)
-    if s[0] in "{&*!%@`":
-        raise YamlSubsetError(f"line {lineno}: unsupported construct {s[:12]!r}")
+    if s[0] in "{&*!":
+        raise YamlUnsupported(f"line {lineno}: unsupported construct {s[:12]!r}")
     if s[0] == '"':
         try:
             value, end = json.JSONDecoder().raw_decode(s)
         except json.JSONDecodeError as exc:
-            raise YamlSubsetError(f"line {lineno}: bad double-quoted scalar ({exc.msg})") from None
+            # YAML 双引号的部分转义（\x、\U 等）JSON 不支持，交给 PyYAML 判断
+            raise YamlUnsupported(f"line {lineno}: double-quoted scalar not decodable as JSON ({exc.msg})") from None
         tail = s[end:].strip()
         if tail and not tail.startswith("#"):
-            raise YamlSubsetError(f"line {lineno}: trailing text after quoted scalar")
+            raise YamlSyntaxError(f"line {lineno}: trailing text after quoted scalar")
         return value
     if s[0] == "'":
         m = re.match(r"'((?:[^']|'')*)'\s*(?:#.*)?$", s)
         if not m:
-            raise YamlSubsetError(f"line {lineno}: bad single-quoted scalar")
+            raise YamlUnsupported(f"line {lineno}: single-quoted scalar spans lines or is malformed")
         return m.group(1).replace("''", "'")
-    s = re.split(r"\s+#", s, maxsplit=1)[0].rstrip()
-    low = s.lower()
-    if low == "true":
-        return True
-    if low == "false":
-        return False
-    if low in ("null", "~"):
-        return None
-    if re.fullmatch(r"[-+]?\d+", s):
-        return int(s)
-    if re.fullmatch(r"[-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?", s):
-        return float(s)
-    return s
+    return _plain_scalar(re.split(r"\s+#", s, maxsplit=1)[0].rstrip(), lineno)
 
 
 _FLOW_ITEM_RE = re.compile(r"""\s*("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^,\[\]{}"'#]*?)\s*(,|\])""")
 
 
 def _yaml_flow_list(s: str, lineno: int) -> list:
-    """单行流式列表，元素只能是标量：[a, "b c", 'd']。不支持嵌套。"""
+    """单行流式列表，元素只能是标量：[a, "b c", 'd']。嵌套与跨行交给 PyYAML。"""
     out: list = []
     pos = 1
     if re.fullmatch(r"\[\s*\](?:\s+#.*)?", s):
@@ -159,30 +209,58 @@ def _yaml_flow_list(s: str, lineno: int) -> list:
     while True:
         m = _FLOW_ITEM_RE.match(s, pos)
         if not m:
-            raise YamlSubsetError(f"line {lineno}: unsupported flow sequence {s[:40]!r}")
+            raise YamlUnsupported(f"line {lineno}: unsupported flow sequence {s[:40]!r}")
         item = m.group(1)
         if not item:
-            raise YamlSubsetError(f"line {lineno}: empty item in flow sequence")
+            raise YamlSyntaxError(f"line {lineno}: empty item in flow sequence")
         out.append(_yaml_scalar(item, lineno))
         pos = m.end()
         if m.group(2) == "]":
             tail = s[pos:].strip()
             if tail and not tail.startswith("#"):
-                raise YamlSubsetError(f"line {lineno}: trailing text after flow sequence")
+                raise YamlSyntaxError(f"line {lineno}: trailing text after flow sequence")
             return out
 
 
-def parse_yaml_subset(text: str):
-    """解析 frontmatter 与 openai.yaml 用到的 YAML 子集。
+def _fold(lines: list[str]) -> str:
+    """YAML 折叠块：普通行之间的换行变空格；空行保留为换行；更深缩进的行前后保留换行。"""
+    lead = 0
+    while lead < len(lines) and lines[lead] == "":
+        lead += 1
+    rest = lines[lead:]
+    if not rest:
+        return "\n" * lead
+    out = rest[0]
+    i = 1
+    while i < len(rest):
+        j = i
+        while j < len(rest) and rest[j] == "":
+            j += 1
+        empties = j - i
+        prev, nxt = rest[i - 1], rest[j]
+        if prev.startswith((" ", "\t")) or nxt.startswith((" ", "\t")):
+            sep = "\n" * (empties + 1)
+        elif empties:
+            sep = "\n" * empties
+        else:
+            sep = " "
+        out += sep + nxt
+        i = j + 1
+    return "\n" * lead + out
 
-    支持：嵌套映射、标量、块标量（| > 及 - + 修饰）、列表（含 “- key: value” 映射项）。
-    不支持锚点、标签、流式集合、多文档；遇到即抛 YamlSubsetError，由调用方决定是否改用 PyYAML。
+
+def parse_yaml_subset(text: str):
+    """解析 frontmatter、openai.yaml、rules.yaml、profiles 用到的 YAML 子集。
+
+    支持：嵌套映射、YAML 1.2 core 标量、块标量（| > 与 strip/clip/keep）、块列表、单行标量流式列表。
+    不支持锚点、别名、标签、流式映射、跨行 plain scalar、多文档：抛 YamlUnsupported，由调用方交给 PyYAML。
+    确定的错误抛 YamlSyntaxError。
     """
     lines = text.splitlines()
 
     def indent_of(line: str) -> int:
         if "\t" in line[: len(line) - len(line.lstrip())]:
-            raise YamlSubsetError("tab indentation is not allowed in YAML")
+            raise YamlSyntaxError("tab indentation is not allowed in YAML")
         return len(line) - len(line.lstrip(" "))
 
     def skip_blank(i: int) -> int:
@@ -190,7 +268,13 @@ def parse_yaml_subset(text: str):
             i += 1
         return i
 
-    def block_scalar(i: int, parent_indent: int, style: str):
+    def block_scalar(i: int, parent_indent: int, header: str, lineno: int):
+        m = _BLOCK_HEADER_RE.match(header)
+        if not m or (m.group(2) and m.group(4)):
+            raise YamlSyntaxError(f"line {lineno}: bad block scalar header {header!r}")
+        if m.group(3):
+            raise YamlUnsupported(f"line {lineno}: block indentation indicator is not supported")
+        style, chomp = m.group(1), m.group(2) or m.group(4)
         body: list[str] = []
         block_indent = None
         while i < len(lines):
@@ -206,22 +290,17 @@ def parse_yaml_subset(text: str):
                 block_indent = ind
             body.append(line[block_indent:])
             i += 1
+        trailing = 0
         while body and body[-1] == "":
             body.pop()
-        if style[0] == "|":
-            value = "\n".join(body)
-        else:
-            paragraphs, current = [], []
-            for part in body:
-                if part == "":
-                    paragraphs.append(" ".join(current))
-                    current = []
-                else:
-                    current.append(part.strip())
-            paragraphs.append(" ".join(current))
-            value = "\n".join(paragraphs)
-        if style.endswith("-") or not value:
+            trailing += 1
+        if not body:
+            return ("\n" * trailing if chomp == "+" else ""), i
+        value = "\n".join(body) if style == "|" else _fold(body)
+        if chomp == "-":
             return value, i
+        if chomp == "+":
+            return value + "\n" + "\n" * trailing, i
         return value + "\n", i
 
     def parse_node(i: int):
@@ -233,9 +312,9 @@ def parse_yaml_subset(text: str):
 
     def parse_value(rest: str, i: int, indent: int):
         """rest 是 “key:” 之后的文本；i 是该键所在行。"""
-        bare = re.split(r"\s+#", rest, maxsplit=1)[0].strip()
-        if bare and re.fullmatch(r"[|>][-+]?", bare):
-            return block_scalar(i + 1, indent, bare)
+        bare = "" if rest.lstrip().startswith("#") else re.split(r"\s+#", rest, maxsplit=1)[0].strip()
+        if bare and bare[0] in "|>":
+            return block_scalar(i + 1, indent, bare, i + 1)
         if bare:
             return _yaml_scalar(rest, i + 1), i + 1
         j = skip_blank(i + 1)
@@ -247,6 +326,11 @@ def parse_yaml_subset(text: str):
             if ind == indent and (nxt.strip() == "-" or nxt.strip().startswith("- ")):
                 return parse_list(j, indent)
         return None, i + 1
+
+    def parse_key(raw_key: str, lineno: int):
+        if raw_key[0] in "\"'":
+            return _yaml_scalar(raw_key, lineno)
+        return _plain_scalar(raw_key.strip(), lineno)
 
     def parse_map(i: int, indent: int):
         out: dict = {}
@@ -260,14 +344,18 @@ def parse_yaml_subset(text: str):
             if ind < indent or (ind == indent and (content == "-" or content.startswith("- "))):
                 return out, i
             if ind > indent:
-                raise YamlSubsetError(f"line {i + 1}: unexpected indentation")
+                # 可能是跨行 plain scalar 的续行（合法 YAML），子集不支持
+                raise YamlUnsupported(f"line {i + 1}: continuation or unexpected indentation")
+            if content in ("---", "...") or content[0] in "?{[&*!":
+                raise YamlUnsupported(f"line {i + 1}: unsupported construct {content[:12]!r}")
             m = _KEY_RE.match(content)
             if not m:
-                raise YamlSubsetError(f"line {i + 1}: expected 'key: value'")
-            raw_key = m.group(1)
-            key = _yaml_scalar(raw_key, i + 1) if raw_key[0] in "\"'" else raw_key.strip()
+                raise YamlSyntaxError(f"line {i + 1}: expected 'key: value'")
+            key = parse_key(m.group(1), i + 1)
+            if isinstance(key, (dict, list)):
+                raise YamlUnsupported(f"line {i + 1}: complex mapping key")
             if key in out:
-                raise YamlSubsetError(f"line {i + 1}: duplicate key {key!r}")
+                raise YamlSyntaxError(f"line {i + 1}: duplicate key {key!r}")
             out[key], i = parse_value(m.group(2) or "", i, indent)
 
     def parse_list(i: int, indent: int):
@@ -281,7 +369,7 @@ def parse_yaml_subset(text: str):
             content = line.strip()
             if ind != indent or not (content == "-" or content.startswith("- ")):
                 if ind > indent:
-                    raise YamlSubsetError(f"line {i + 1}: unexpected indentation")
+                    raise YamlUnsupported(f"line {i + 1}: continuation or unexpected indentation")
                 return out, i
             item = content[1:].strip()
             if not item:
@@ -294,6 +382,8 @@ def parse_yaml_subset(text: str):
                 # “- key: value”：把该行改写成缩进 +2 的映射行，后续同级键自然接上
                 lines[i] = " " * (indent + 2) + item
                 value, i = parse_map(i, indent + 2)
+            elif item[0] in "|>":
+                value, i = block_scalar(i + 1, indent, item.split(" #")[0].strip(), i + 1)
             else:
                 value, i = _yaml_scalar(item, i + 1), i + 1
             out.append(value)
@@ -304,7 +394,7 @@ def parse_yaml_subset(text: str):
     value, end = parse_node(start)
     end = skip_blank(end)
     if end < len(lines):
-        raise YamlSubsetError(f"line {end + 1}: unexpected content")
+        raise YamlSyntaxError(f"line {end + 1}: unexpected content")
     return value
 
 
@@ -315,12 +405,12 @@ def _strict_pyyaml_load(yaml, text: str, all_documents: bool = False):
         pass
 
     def construct_mapping(loader, node, deep=False):
-        keys = set()
+        keys = []
         for key_node, _value in node.value:
             key = loader.construct_object(key_node, deep=deep)
             if key in keys:
                 raise yaml.constructor.ConstructorError(None, None, f"duplicate key {key!r}", key_node.start_mark)
-            keys.add(key)
+            keys.append(key)
         return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
 
     StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping)
@@ -332,21 +422,26 @@ def _strict_pyyaml_load(yaml, text: str, all_documents: bool = False):
 def load_yaml(text: str):
     """先用子集解析器；只有子集不支持的写法才交给 PyYAML（若已安装）。
 
-    重复键是确定的错误，不退回 PyYAML，避免其“后者覆盖”语义把错误变成通过。
+    YamlSyntaxError 不退回 PyYAML：PyYAML 的“重复键后者覆盖”和 YAML 1.1 读法会把错误变成通过。
+    没有 PyYAML 时 YamlUnsupported 原样抛出，调用方应报告 NOT_RUN（能力不足），而不是“非法 YAML”。
     """
     try:
         return parse_yaml_subset(text)
-    except YamlSubsetError as exc:
-        if "duplicate key" in str(exc):
-            raise
+    except YamlUnsupported as unsupported:
         try:
             import yaml  # type: ignore[import-not-found]
         except ImportError:
-            raise exc from None
+            # 注意：这里的裸 raise 会重新抛出 ImportError，必须显式抛出原来的 YamlUnsupported
+            raise unsupported from None
         try:
             return _strict_pyyaml_load(yaml, text)
         except yaml.YAMLError as yexc:
-            raise YamlSubsetError(str(yexc)) from None
+            raise YamlSyntaxError(str(yexc)) from None
+
+
+def sorted_keys(keys) -> list:
+    """YAML 键可能混有 int/str/None，排序时统一按 str 比较，避免 TypeError。"""
+    return sorted(keys, key=lambda k: (type(k).__name__, str(k)))
 
 
 # --------------------------------------------------------------------------- Markdown 扫描
@@ -354,11 +449,17 @@ def load_yaml(text: str):
 FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
 CODE_SPAN_RE = re.compile(r"`[^`\n]+`")
 LINK_RE = re.compile(r"!?\[(?:[^\]\\]|\\.)*\]\(\s*<?([^)\s>]+)>?(?:\s+[\"'][^)]*[\"'])?\s*\)")
+# 引用式链接：定义 [label]: target；使用 [text][label] 与 [label][]
+REF_DEF_RE = re.compile(r"^ {0,3}\[([^\]]+)\]:\s*<?([^\s>]+)>?(?:\s+.*)?$")
+REF_FULL_RE = re.compile(r"!?\[((?:[^\]\\]|\\.)*)\]\[([^\]]*)\]")
 SECTION_HEADING_RE = re.compile(r"^#{1,6}\s+(\d+)(?=[.、:：)）\s]|$)")
 _FILE_REF = (r"(?:\[[^\]]*\]\(([^)\s#]+\.md)(?:#[^)]*)?\)"
              r"|`([^`\s]+\.md)`"
              r"|(?<![\w/.-])((?:[\w.-]+/)*[\w-]+\.md))")
-SECTION_REF_RE = re.compile(_FILE_REF + r"?\s*(§\d+(?:\s*(?:[、,，/–—~-]|和|与|及|至)\s*§?\d+)*)")
+# 文件引用与 § 之间允许少量连接词（“[x](a.md) 的 §2”）
+SECTION_REF_RE = re.compile(_FILE_REF + r"?\s*(?:的|中的|中|里的|里)?\s*(§\d+(?:\s*(?:[、,，/–—~-]|和|与|及|至)\s*§?\d+)*)")
+# § 前紧挨着一个不是 .md 引用的 ASCII 词（如旧文件名 “cpp-coding §6”）：无法确定归属
+AMBIGUOUS_SECTION_PREFIX_RE = re.compile(r"[A-Za-z0-9_./`-]*[A-Za-z_./`-][A-Za-z0-9_./`-]*\s*(?:的|中的|中|里的|里)?\s*$")
 URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 
@@ -380,6 +481,17 @@ def prose_lines(text: str):
 
 def blank_code_spans(line: str) -> str:
     return CODE_SPAN_RE.sub(lambda m: " " * len(m.group(0)), line)
+
+
+def read_text_or_none(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def normalize_label(label: str) -> str:
+    return " ".join(label.split()).casefold()
 
 
 def section_numbers(text: str) -> set[int]:
@@ -412,23 +524,42 @@ class RefContext:
 
 def check_links(md: Path, text: str, ctx: RefContext, check: Check, linked: set[Path] | None = None) -> None:
     rel = str(md.relative_to(ctx.rel_base))
-    for no, line in prose_lines(text):
-        for m in LINK_RE.finditer(blank_code_spans(line)):
-            target = m.group(1)
-            if is_external(target):
-                continue
-            path_part = target.split("#", 1)[0]
-            if not path_part:
-                continue
-            dest = (md.parent / path_part)
-            if not dest.exists():
-                check.error(rel, no, f"broken link: {target}")
-                continue
-            if ctx.confine is not None and not inside(dest, ctx.confine):
-                check.error(rel, no, f"link escapes skill directory: {target}")
-                continue
-            if linked is not None:
-                linked.add(dest.resolve())
+
+    def verify(target: str, no: int) -> None:
+        if is_external(target):
+            return
+        path_part = target.split("#", 1)[0]
+        if not path_part:
+            return
+        dest = md.parent / path_part
+        if not dest.exists():
+            check.error(rel, no, f"broken link: {target}")
+        elif ctx.confine is not None and not inside(dest, ctx.confine):
+            check.error(rel, no, f"link escapes skill directory: {target}")
+        elif linked is not None:
+            linked.add(dest.resolve())
+
+    lines = list(prose_lines(text))
+    definitions: dict[str, str] = {}
+    def_lines: set[int] = set()
+    for no, line in lines:
+        m = REF_DEF_RE.match(line)
+        if m:
+            definitions.setdefault(normalize_label(m.group(1)), m.group(2))
+            def_lines.add(no)
+            verify(m.group(2), no)
+    for no, line in lines:
+        if no in def_lines:
+            continue
+        scan = blank_code_spans(line)
+        for m in LINK_RE.finditer(scan):
+            verify(m.group(1), no)
+        scan = LINK_RE.sub(lambda m: " " * len(m.group(0)), scan)
+        for m in REF_FULL_RE.finditer(scan):
+            label = normalize_label(m.group(2) or m.group(1))
+            if label not in definitions:
+                check.error(rel, no, f"undefined link reference: [{m.group(2) or m.group(1)}]")
+        # 简写形式 [label] 只有在已定义时才是链接，其目标已在定义处校验；未定义的是普通方括号文字
 
 
 def check_paths(md: Path, text: str, ctx: RefContext, check: Check) -> None:
@@ -438,20 +569,25 @@ def check_paths(md: Path, text: str, ctx: RefContext, check: Check) -> None:
             for token in span.group(0)[1:-1].split():
                 if "/" not in token or any(c in token for c in "<>*?[]{}$|=:"):
                     continue
-                head = token.split("/", 1)[0]
-                if not head or head in (".", ".."):
-                    # 绝对路径、斜杠命令、./ 前缀（约定为外部源码树路径，如 ./scripts/checkpatch.pl）不检查
+                norm = token[2:] if token.startswith("./") else token
+                # 外部源码树中的路径（如 Linux 的 ./scripts/checkpatch.pl）必须登记在 external_paths
+                if norm.rstrip("/") in ctx.external_paths:
                     continue
+                if norm.startswith("../"):
+                    if ctx.confine is not None:
+                        check.error(rel, no, f"path escapes skill directory: {token}")
+                    continue
+                head = norm.split("/", 1)[0]
+                if not head:
+                    continue  # 绝对路径或斜杠命令
                 candidates: list[Path] = []
                 if ctx.local_dirs and (md.parent / head).is_dir():
                     candidates = [md.parent]
                 elif head in SKILL_ROOT_DIRS:
-                    if token.rstrip("/") in ctx.external_paths:
-                        continue
                     candidates = ctx.skill_roots
                 else:
                     continue
-                if not any((base / token).exists() for base in candidates):
+                if not any((base / norm).exists() for base in candidates):
                     check.error(rel, no, f"path not found: {token}")
 
 
@@ -469,10 +605,11 @@ def resolve_md(md: Path, name: str, ctx: RefContext) -> Path | None:
 def check_sections(md: Path, text: str, ctx: RefContext, check: Check, cache: dict[Path, set[int]]) -> None:
     rel = str(md.relative_to(ctx.rel_base))
 
-    def numbers(path: Path) -> set[int]:
+    def numbers(path: Path) -> set[int] | None:
         key = path.resolve()
         if key not in cache:
-            cache[key] = section_numbers(path.read_text(encoding="utf-8"))
+            body = read_text_or_none(path)
+            cache[key] = None if body is None else section_numbers(body)
         return cache[key]
 
     for no, line in prose_lines(text):
@@ -484,8 +621,16 @@ def check_sections(md: Path, text: str, ctx: RefContext, check: Check, cache: di
                     check.error(rel, no, f"§ reference to unknown file: {name}")
                     continue
             else:
+                if AMBIGUOUS_SECTION_PREFIX_RE.search(line[:m.start()]):
+                    word = line[:m.start()].rstrip().split()[-1]
+                    check.error(rel, no, f"ambiguous § reference after {word!r}: name the file as a .md link "
+                                         "or path, or drop the word")
+                    continue
                 target = md
             have = numbers(target)
+            if have is None:
+                check.error(rel, no, f"cannot read {target.name} to resolve §")
+                continue
             for num in map(int, re.findall(r"\d+", m.group(4))):
                 if num not in have:
                     if name:
@@ -498,11 +643,12 @@ def check_sections(md: Path, text: str, ctx: RefContext, check: Check, cache: di
 # --------------------------------------------------------------------------- 技能检查
 
 def split_frontmatter(text: str):
+    """分隔符必须是第 0 列的 '---'；块标量里缩进的 '---' 不是结束符。"""
     lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].rstrip() != "---":
         return None, None, 0
     for idx in range(1, len(lines)):
-        if lines[idx].strip() == "---":
+        if lines[idx].rstrip() == "---":
             return "\n".join(lines[1:idx]), "\n".join(lines[idx + 1:]), idx + 1
     return None, None, 0
 
@@ -512,20 +658,28 @@ def check_frontmatter(skill: Path, cfg: dict, check: Check) -> dict | None:
     if not entry.is_file():
         check.error(skill.name, None, "SKILL.md not found")
         return None
-    text = entry.read_text(encoding="utf-8")
+    text = read_text_or_none(entry)
+    if text is None:
+        check.error("SKILL.md", None, "SKILL.md is not readable UTF-8")
+        return None
     raw, _body, _end = split_frontmatter(text)
     if raw is None:
         check.error("SKILL.md", 1, "missing YAML frontmatter delimited by '---'")
         return None
     try:
         meta = load_yaml(raw)
-    except YamlSubsetError as exc:
+    except YamlUnsupported as exc:
+        check.not_run = f"frontmatter uses YAML outside the built-in subset and PyYAML is not installed ({exc})"
+        return None
+    except YamlSyntaxError as exc:
         check.error("SKILL.md", None, f"frontmatter is not valid YAML: {exc}")
         return None
     if not isinstance(meta, dict):
         check.error("SKILL.md", None, "frontmatter must be a mapping")
         return None
-    for key in sorted(set(meta) - FRONTMATTER_KEYS):
+    for key in sorted_keys(k for k in meta if not isinstance(k, str)):
+        check.error("SKILL.md", None, f"frontmatter key {key!r} must be a string")
+    for key in sorted_keys(k for k in meta if isinstance(k, str) and k not in FRONTMATTER_KEYS):
         check.error("SKILL.md", None, f"unknown frontmatter field: {key}")
     name = meta.get("name")
     if not isinstance(name, str) or not name:
@@ -545,23 +699,23 @@ def check_frontmatter(skill: Path, cfg: dict, check: Check) -> dict | None:
             check.error("SKILL.md", None, f"description longer than 1024 characters ({len(desc)})")
         if not TRIGGER_HINT_RE.search(desc):
             check.warn("SKILL.md", None, "description does not say when to use the skill")
-    comp = meta.get("compatibility")
-    if comp is not None and (not isinstance(comp, str) or not 1 <= len(comp) <= 500):
-        check.error("SKILL.md", None, "compatibility must be a 1-500 character string")
-    md = meta.get("metadata")
-    if md is not None:
+    # 可选字段按“是否出现”校验：显式 null 也必须满足类型约束
+    if "compatibility" in meta:
+        comp = meta["compatibility"]
+        if not isinstance(comp, str) or not 1 <= len(comp) <= 500:
+            check.error("SKILL.md", None, "compatibility must be a 1-500 character string")
+    if "metadata" in meta:
+        md = meta["metadata"]
         if not isinstance(md, dict):
             check.error("SKILL.md", None, "metadata must be a mapping")
         else:
             for k, v in md.items():
                 if not isinstance(k, str) or not isinstance(v, str):
                     check.error("SKILL.md", None, f"metadata.{k}: keys and values must be strings (quote numbers)")
-    tools = meta.get("allowed-tools")
-    if tools is not None and not isinstance(tools, str):
+    if "allowed-tools" in meta and not isinstance(meta["allowed-tools"], str):
         check.error("SKILL.md", None, "allowed-tools must be a space-separated string")
-    lic = meta.get("license")
-    if lic is not None and not isinstance(lic, str):
-        check.error("SKILL.md", None, "license must be a string")
+    if "license" in meta and not (isinstance(meta["license"], str) and meta["license"].strip()):
+        check.error("SKILL.md", None, "license must be a non-empty string")
 
     limit = cfg.get("max_skill_md_lines", SPEC_MAX_SKILL_LINES)
     count = len(text.splitlines())
@@ -585,8 +739,8 @@ def check_reachability(skill: Path, linked_from_entry: set[Path], check: Check) 
             check.error(str(md.relative_to(skill)), None, "not linked from SKILL.md")
 
 
-def check_orphans(skill: Path, check: Check) -> None:
-    corpus = "\n".join(p.read_text(encoding="utf-8") for p in skill_markdown(skill))
+def check_orphans(skill: Path, check: Check, texts: list[str]) -> None:
+    corpus = "\n".join(texts)
     for root in ("scripts", "assets", "standards", "profiles"):
         base = skill / root
         if not base.is_dir():
@@ -603,6 +757,7 @@ def check_scripts(skill: Path, check: Check) -> None:
     base = skill / "scripts"
     if not base.is_dir():
         return
+    unchecked: dict[str, int] = {}
     for path in sorted(p for p in base.rglob("*") if p.is_file()):
         rel = str(path.relative_to(skill))
         head = path.read_bytes()[:256]
@@ -612,8 +767,12 @@ def check_scripts(skill: Path, check: Check) -> None:
         is_py = path.suffix == ".py" or "python" in shebang
         is_sh = path.suffix == ".sh" or re.search(r"\b(?:ba)?sh\b", shebang) is not None
         if is_py:
+            source = read_text_or_none(path)
+            if source is None:
+                check.error(rel, None, "Python source is not readable UTF-8")
+                continue
             try:
-                compile(path.read_text(encoding="utf-8"), rel, "exec")
+                compile(source, rel, "exec")
             except SyntaxError as exc:
                 check.error(rel, exc.lineno, f"Python syntax error: {exc.msg}")
         elif is_sh:
@@ -621,10 +780,15 @@ def check_scripts(skill: Path, check: Check) -> None:
             exe = shutil.which(shell)
             if exe is None:
                 check.warn(rel, None, f"{shell} not found; syntax not checked")
+                unchecked[shell] = unchecked.get(shell, 0) + 1
                 continue
             proc = subprocess.run([exe, "-n", str(path)], capture_output=True, text=True, check=False)
             if proc.returncode != 0:
                 check.error(rel, None, f"{shell} -n failed: {proc.stderr.strip().splitlines()[-1:] or ''}")
+    if unchecked:
+        # 有脚本没检查就不能报 PASS；有错误时 FAIL 优先
+        check.not_run = "; ".join(f"{shell} not found: {n} script(s) not syntax-checked"
+                                  for shell, n in sorted(unchecked.items()))
 
 
 def check_json(skill: Path, check: Check) -> None:
@@ -650,8 +814,12 @@ def check_yaml_assets(skill: Path, check: Check) -> None:
         check.not_run = f"PyYAML not installed; {len(files)} YAML files not parsed"
         return
     for path in files:
+        body = read_text_or_none(path)
+        if body is None:
+            check.error(str(path.relative_to(skill)), None, "not readable UTF-8")
+            continue
         try:
-            _strict_pyyaml_load(yaml, path.read_text(encoding="utf-8"), all_documents=True)
+            _strict_pyyaml_load(yaml, body, all_documents=True)
         except yaml.YAMLError as exc:
             mark = getattr(exc, "problem_mark", None)
             check.error(str(path.relative_to(skill)), mark.line + 1 if mark else None, f"invalid YAML: {exc}")
@@ -662,9 +830,16 @@ def check_openai_yaml(skill: Path, check: Check) -> None:
     if not path.is_file():
         return
     rel = "agents/openai.yaml"
+    body = read_text_or_none(path)
+    if body is None:
+        check.error(rel, None, "not readable UTF-8")
+        return
     try:
-        data = load_yaml(path.read_text(encoding="utf-8"))
-    except YamlSubsetError as exc:
+        data = load_yaml(body)
+    except YamlUnsupported as exc:
+        check.not_run = f"uses YAML outside the built-in subset and PyYAML is not installed ({exc})"
+        return
+    except YamlSyntaxError as exc:
         check.error(rel, None, f"cannot parse: {exc}")
         return
     if not isinstance(data, dict):
@@ -686,8 +861,14 @@ def check_openai_yaml(skill: Path, check: Check) -> None:
             if k in iface and not isinstance(iface[k], str):
                 check.error(rel, None, f"interface.{k} must be a string")
         for k in ("icon_small", "icon_large"):
-            if k in iface and not (isinstance(iface[k], str) and (skill / iface[k]).is_file()):
-                check.error(rel, None, f"interface.{k}: file not found: {iface.get(k)}")
+            if k not in iface:
+                continue
+            icon = iface[k]
+            if not (isinstance(icon, str) and (skill / icon).is_file()):
+                check.error(rel, None, f"interface.{k}: file not found: {icon!r}")
+            elif not inside(skill / icon, skill):
+                # 安装时只复制技能目录，技能外的图标不会随技能交付
+                check.error(rel, None, f"interface.{k}: icon is outside the skill directory: {icon}")
         color = iface.get("brand_color")
         if color is not None and not (isinstance(color, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", color)):
             check.error(rel, None, f"interface.brand_color must look like #RRGGBB: {color!r}")
@@ -708,6 +889,10 @@ def check_openai_yaml(skill: Path, check: Check) -> None:
                 for k in tool:
                     if k not in OPENAI_TOOL_KEYS:
                         check.warn(rel, None, f"undocumented key: dependencies.tools[{idx}].{k}")
+                    elif not (isinstance(tool[k], str) and tool[k].strip()):
+                        check.error(rel, None, f"dependencies.tools[{idx}].{k} must be a non-empty string")
+                if isinstance(tool.get("type"), str) and tool["type"] not in OPENAI_TOOL_TYPES:
+                    check.warn(rel, None, f"dependencies.tools[{idx}].type {tool['type']!r} is not documented")
 
 
 RULES_FILE = Path("standards") / "rules.yaml"
@@ -740,24 +925,38 @@ def _check_ref(skill: Path, rel: str, where: str, ref: str, check: Check, cache:
     if m.group(2):
         key = target.resolve()
         if key not in cache:
-            cache[key] = section_numbers(target.read_text(encoding="utf-8"))
+            body = read_text_or_none(target)
+            cache[key] = None if body is None else section_numbers(body)
+        if cache[key] is None:
+            check.error(rel, None, f"{where}: cannot read {m.group(1)}")
+            return
         for num in map(int, re.findall(r"\d+", m.group(2))):
             if num not in cache[key]:
                 check.error(rel, None, f"{where}: §{num} not found in {m.group(1)}")
 
 
-def load_rules(skill: Path) -> tuple[dict | None, str | None]:
+def load_rules(skill: Path) -> tuple[dict | None, str | None, str | None]:
+    """返回 (数据, 错误, 未执行原因)。"""
     path = skill / RULES_FILE
     if not path.is_file():
-        return None, None
+        return None, None, None
+    body = read_text_or_none(path)
+    if body is None:
+        return None, "not readable UTF-8", None
     try:
-        return load_yaml(path.read_text(encoding="utf-8")), None
-    except YamlSubsetError as exc:
-        return None, f"cannot parse: {exc}"
+        return load_yaml(body), None, None
+    except YamlUnsupported as exc:
+        return None, None, f"uses YAML outside the built-in subset and PyYAML is not installed ({exc})"
+    except YamlSyntaxError as exc:
+        return None, f"cannot parse: {exc}", None
 
 
-def check_rules(skill: Path, data: dict | None, parse_error: str | None, check: Check) -> None:
+def check_rules(skill: Path, data: dict | None, parse_error: str | None, not_run: str | None,
+                check: Check) -> None:
     rel = str(RULES_FILE)
+    if not_run:
+        check.not_run = not_run
+        return
     if data is None and parse_error is None:
         check.not_run = f"no {rel}"
         return
@@ -767,7 +966,7 @@ def check_rules(skill: Path, data: dict | None, parse_error: str | None, check: 
     if not isinstance(data, dict):
         check.error(rel, None, "top level must be a mapping")
         return
-    for key in sorted(set(data) - RULES_TOP_KEYS):
+    for key in sorted_keys(set(data) - RULES_TOP_KEYS):
         check.error(rel, None, f"unknown top-level key: {key}")
     profiles = data.get("profiles")
     if not _str_list(profiles) or len(set(profiles)) != len(profiles):
@@ -826,7 +1025,7 @@ def check_rules(skill: Path, data: dict | None, parse_error: str | None, check: 
         for key in RULE_REQUIRED:
             if key not in rule:
                 check.error(rel, None, f"{where}: missing {key}")
-        for key in sorted(set(rule) - set(RULE_REQUIRED) - set(RULE_OPTIONAL)):
+        for key in sorted_keys(set(rule) - set(RULE_REQUIRED) - set(RULE_OPTIONAL)):
             check.error(rel, None, f"{where}: unknown key {key}")
         for key in ("title", "when", "except", "cost"):
             if key in rule and not (isinstance(rule[key], str) and rule[key].strip()):
@@ -896,10 +1095,14 @@ def check_rules(skill: Path, data: dict | None, parse_error: str | None, check: 
                 check.error(rel, None, f"{rid}: conflict with {other} is not listed on {other}")
 
 
-def check_profiles(skill: Path, data: dict | None, rules_error: str | None, check: Check) -> None:
+def check_profiles(skill: Path, data: dict | None, rules_error: str | None, rules_not_run: str | None,
+                   check: Check) -> None:
     pdir = skill / "profiles"
     if rules_error is not None or (data is not None and not isinstance(data, dict)):
         check.blocked = "standards/rules.yaml is invalid (see rules)"
+        return
+    if rules_not_run is not None:
+        check.blocked = "standards/rules.yaml was not parsed (see rules)"
         return
     if not isinstance(data, dict):
         if pdir.is_dir():
@@ -920,9 +1123,16 @@ def check_profiles(skill: Path, data: dict | None, rules_error: str | None, chec
         rel = f"profiles/{path.name}"
         if stem not in declared:
             check.error(rel, None, "not declared in standards/rules.yaml profiles")
+        body = read_text_or_none(path)
+        if body is None:
+            check.error(rel, None, "not readable UTF-8")
+            continue
         try:
-            prof = load_yaml(path.read_text(encoding="utf-8"))
-        except YamlSubsetError as exc:
+            prof = load_yaml(body)
+        except YamlUnsupported as exc:
+            check.not_run = f"{rel} uses YAML outside the built-in subset and PyYAML is not installed ({exc})"
+            continue
+        except YamlSyntaxError as exc:
             check.error(rel, None, f"cannot parse: {exc}")
             continue
         if not isinstance(prof, dict):
@@ -931,7 +1141,7 @@ def check_profiles(skill: Path, data: dict | None, rules_error: str | None, chec
         for key in PROFILE_REQUIRED:
             if key not in prof:
                 check.error(rel, None, f"missing {key}")
-        for key in sorted(set(prof) - set(PROFILE_REQUIRED)):
+        for key in sorted_keys(set(prof) - set(PROFILE_REQUIRED)):
             check.error(rel, None, f"unknown key {key}")
         if prof.get("id") != stem:
             check.error(rel, None, f"id {prof.get('id')!r} does not match file name")
@@ -1000,11 +1210,12 @@ def validate_skill(skill: Path, cfg: dict) -> dict:
                      external_paths={p.rstrip("/") for p in cfg.get("external_paths", [])})
     entry_links: set[Path] = set()
     cache: dict[Path, set[int]] = {}
+    texts: list[str] = []
     for md in skill_markdown(skill):
-        try:
-            text = md.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
+        text = read_text_or_none(md)
+        if text is None:
             continue  # hygiene 已报告
+        texts.append(text)
         check_links(md, text, ctx, checks["links"], entry_links if md == skill / "SKILL.md" else None)
         check_paths(md, text, ctx, checks["paths"])
         check_sections(md, text, ctx, checks["sections"], cache)
@@ -1012,14 +1223,14 @@ def validate_skill(skill: Path, cfg: dict) -> dict:
         check_reachability(skill, entry_links, checks["reachability"])
     else:
         checks["reachability"].not_run = "SKILL.md missing"
-    check_orphans(skill, checks["orphans"])
+    check_orphans(skill, checks["orphans"], texts)
     check_scripts(skill, checks["scripts"])
     check_json(skill, checks["data-json"])
     check_yaml_assets(skill, checks["data-yaml"])
     check_openai_yaml(skill, checks["openai-yaml"])
-    rules, rules_error = load_rules(skill)
-    check_rules(skill, rules, rules_error, checks["rules"])
-    check_profiles(skill, rules, rules_error, checks["profiles"])
+    rules, rules_error, rules_not_run = load_rules(skill)
+    check_rules(skill, rules, rules_error, rules_not_run, checks["rules"])
+    check_profiles(skill, rules, rules_error, rules_not_run, checks["profiles"])
     name = meta.get("name") if isinstance(meta, dict) else None
     return {"kind": "skill", "name": name or skill.name, "path": str(skill),
             "checks": [c.to_json() for c in checks.values()]}
@@ -1029,7 +1240,10 @@ def validate_doc(doc: Path, skills: list[Path], external_paths: set[str]) -> dic
     checks = {cid: Check(cid) for cid in ("links", "paths", "sections")}
     ctx = RefContext(rel_base=doc.parent, skill_roots=skills, confine=None, local_dirs=True,
                      external_paths=external_paths)
-    text = doc.read_text(encoding="utf-8")
+    text = read_text_or_none(doc)
+    if text is None:
+        checks["links"].error(doc.name, None, "not readable UTF-8")
+        return {"kind": "doc", "name": doc.name, "path": str(doc), "checks": [c.to_json() for c in checks.values()]}
     check_links(doc, text, ctx, checks["links"])
     check_paths(doc, text, ctx, checks["paths"])
     check_sections(doc, text, ctx, checks["sections"], {})

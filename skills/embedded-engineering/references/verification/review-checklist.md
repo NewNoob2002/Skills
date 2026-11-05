@@ -26,7 +26,7 @@
 - [ ] 任务：单一职责、`DelayUntil` 周期、栈预算与溢出检测、静态分配
 - [ ] 看门狗基于各子系统进展
 - [ ] DMA 缓冲区对齐与 cache 维护（有 D-cache 时）
-- [ ] Ceedling：新增/修改的公共函数有测试（正常、参数错误、依赖错误、边界）；`ceedling test:all` 结果与覆盖率已报告
+- [ ] Ceedling（C 模块；C++ 模块见 F 节 CppUTest 条目）：新增/修改的公共函数有测试（正常、参数错误、依赖错误、边界）；`ceedling test:all` 结果与覆盖率已报告
 - [ ] map 文件/size：Flash、RAM 余量变化已报告（目标构建可用时）
 
 ## C. `zephyr`
@@ -73,5 +73,5 @@
 - [ ] 无 `volatile` 复合运算（C++20）；`volatile` 只用于 MMIO/DMA 描述符
 - [ ] ISR 向量 `extern "C"` 且名字与启动文件一致；C 回调用 `noexcept` 蹦床；跨边界类型为标准布局
 - [ ] SDK 错误码在 bsp 层映射为 `Status`，返回值 `[[nodiscard]]` 且被检查
-- [ ] CppUTest：新增/修改的公共行为有测试；接缝优先编译期 Fake；`-r2 -s` 运行通过；CppUTest 头最后包含
+- [ ] CppUTest（`mcu-*`、`linux-userspace`；`zephyr` 的 C++ 以 C 节 ztest + Twister 为准，纯逻辑可额外 CppUTest）：新增/修改的公共行为有测试；接缝优先编译期 Fake；`-r2 -s` 运行通过；CppUTest 头最后包含
 - [ ] 负向编译测试覆盖关键 `static_assert`（配置校验、Concept 约束）

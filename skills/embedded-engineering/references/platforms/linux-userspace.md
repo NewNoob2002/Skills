@@ -22,7 +22,7 @@
 
 | 层 | 工具 |
 | --- | --- |
-| 单元测试 | 项目既有框架；无则 Ceedling/Unity（[verification/ceedling.md](../verification/ceedling.md)），或 cmocka |
+| 单元测试 | 项目既有框架；无则 C 用 Ceedling/Unity（[verification/ceedling.md](../verification/ceedling.md)）或 cmocka，C++ 用 CppUTest（[verification/cpp-testing.md](../verification/cpp-testing.md)） |
 | 运行期检测 | `-fsanitize=address,undefined`（host 与支持的目标），Valgrind |
 | 静态检查 | 编译告警门禁、clang-tidy、cppcheck；采用 BARR-C 格式层时运行 `scripts/barrc/check.sh` |
 | 集成 | QEMU 镜像、目标板 + 实际外设；记录镜像版本与内核版本 |
