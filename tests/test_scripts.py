@@ -1,6 +1,7 @@
 """embedded-engineering 脚本回归测试（仅标准库）：python3 -m unittest discover -s tests -v"""
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -170,6 +171,43 @@ class DetectProfileTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(self.detect(tmp)["suggested"])
 
+
+def _load_module(name, path):
+    import importlib.util
+    sys.dont_write_bytecode = True  # 不在技能目录写 __pycache__
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class RulesConsistencyTest(unittest.TestCase):
+    """standards/rules.yaml 中声明的 profile 与工具检查项必须与脚本实际实现一致。"""
+
+    @classmethod
+    def setUpClass(cls):
+        vs = _load_module("validate_skill", SKILL.parent.parent / "tools" / "validate_skill.py")
+        cls.rules = vs.parse_yaml_subset((SKILL / "standards" / "rules.yaml").read_text(encoding="utf-8"))
+
+    def test_profiles_match_detect_profile(self):
+        detect = _load_module("detect_profile", DETECT)
+        detected = {rule[0] for rule in detect.NAME_RULES}
+        self.assertEqual(set(self.rules["profiles"]), detected)
+        self.assertEqual({p.stem for p in (SKILL / "profiles").glob("*.yaml")}, detected)
+
+    def test_arch_lint_checks_match_implementation(self):
+        source = ARCH_LINT.read_text(encoding="utf-8")
+        kinds = set(re.findall(r'"kind": "([a-z_]+)"', source)) - {"io_error"}
+        config = json.loads((SKILL / "assets" / "arch_layers.json").read_text(encoding="utf-8"))
+        kinds |= set(config["code_patterns"])
+        self.assertEqual(set(self.rules["verify_tools"]["arch_lint"]["checks"]), kinds)
+
+    def test_cpp_cost_checks_match_implementation(self):
+        cost = _load_module("cpp_cost", SKILL / "scripts" / "cpp_cost.py")
+        declared = set(self.rules["verify_tools"]["cpp_cost"]["checks"])
+        # budget/diff 是 check 的 --budget 与 diff 子命令，其余是符号类别
+        self.assertEqual(declared - {"budget", "diff"}, set(cost.SYMBOL_CLASSES))
 
 if __name__ == "__main__":
     unittest.main()

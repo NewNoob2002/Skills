@@ -1,0 +1,23 @@
+# profile：linux-kernel。适用规则 = standards/rules.yaml 中 profiles 含本 id 或 all 的条目。
+id: linux-kernel
+summary: "嵌入式 Linux 内核驱动、BSP 与 DT binding"
+evidence: "scripts/detect_profile.py：Kbuild、obj-y/obj-m、MODULE_LICENSE、DT schema binding、MAINTAINERS"
+coding:
+  c: "内核 coding-style.rst + checkpatch；BARR-C 只取不冲突的安全核心"
+  cpp: "不引入 C++"
+architecture: "内核子系统框架（platform/i2c/spi driver、regmap、IIO 等），不自造抽象层"
+references:
+  - references/platforms/linux-kernel.md
+  - references/profiles.md
+tests:
+  c: "KUnit / kselftest"
+  target: "目标内核构建 + 实板；DT 用 dt_binding_check / dtbs_check"
+gates:
+  - tool: checkpatch
+    run: "./scripts/checkpatch.pl --strict -g HEAD"
+  - tool: kernel_build
+    run: "make W=1 <dir>/ 与 make C=1"
+  - tool: dt_binding_check
+    run: "make dt_binding_check DT_SCHEMA_FILES=<file>"
+  - tool: kunit
+    run: "./tools/testing/kunit/kunit.py run --kunitconfig=<dir>"

@@ -1,0 +1,21 @@
+# profile：linux-userspace。适用规则 = standards/rules.yaml 中 profiles 含本 id 或 all 的条目。
+id: linux-userspace
+summary: "嵌入式 Linux 用户态守护进程、工具与中间件"
+evidence: "scripts/detect_profile.py：Yocto recipe（*.bb）、systemd unit、Linux 应用的 CMake/Meson 工程"
+coding:
+  c: "项目既有规范；没有时用 BARR-C 安全核心，格式层可选"
+  cpp: "references/cpp/coding.md 的 T3 规则"
+architecture: "硬件适配层集中（libgpiod、spidev、i2c-dev、IIO）+ 进程/服务边界"
+references:
+  - references/platforms/linux-userspace.md
+  - references/c/barr-c.md
+  - references/cpp/coding.md
+tests:
+  c: "项目既有框架；没有时用 Ceedling/Unity 或 cmocka"
+  cpp: "项目既有框架；没有时用 CppUTest"
+  target: "QEMU 镜像或目标板；记录镜像与内核版本"
+gates:
+  - tool: sanitizers
+    run: "-fsanitize=address,undefined 构建并运行 host 测试"
+  - tool: c_compiler_flags
+    run: "项目告警组，或 assets/barr-c/COMPILER_FLAGS.md"

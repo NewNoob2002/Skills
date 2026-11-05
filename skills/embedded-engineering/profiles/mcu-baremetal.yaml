@@ -1,0 +1,31 @@
+# profile：mcu-baremetal。适用规则 = standards/rules.yaml 中 profiles 含本 id 或 all 的条目。
+id: mcu-baremetal
+summary: "MCU 裸机固件（Cortex-M、RISC-V 等），无 RTOS"
+evidence: "scripts/detect_profile.py：startup_*.s、链接脚本 *.ld/*.sct、CMSIS core 头、厂商 HAL 头、.ioc"
+coding:
+  c: "BARR-C:2018 全量（安全核心 + 格式/命名层）"
+  cpp: "references/cpp/coding.md，按资源等级 T0–T3 取舍特性"
+architecture: "分层架构：app → module → interface ← bsp/driver → platform"
+references:
+  - references/architecture/mcu-architecture.md
+  - references/rtos/mcu-isr-rtos.md
+  - references/c/barr-c.md
+  - references/cpp/coding.md
+  - references/cpp/features.md
+  - references/verification/ceedling.md
+  - references/verification/cpp-testing.md
+tests:
+  c: "Ceedling（Unity + CMock）"
+  cpp: "CppUTest（CppUMock）"
+  target: "目标机构建 + size/map；ISR 时延与栈水位需上板实测"
+gates:
+  - tool: arch_lint
+    run: "python3 <skill>/scripts/arch_lint.py <repo>"
+  - tool: barrc_check
+    run: "sh <skill>/scripts/barrc/check.sh <app/module/interface/driver/bsp 下的 .c/.h>"
+  - tool: c_compiler_flags
+    run: "按 assets/barr-c/COMPILER_FLAGS.md 配置告警，-Werror"
+  - tool: cpp_cost
+    run: "python3 <skill>/scripts/cpp_cost.py check <elf> --tier <Tn>（含 C++ 时）"
+  - tool: ceedling
+    run: "ceedling test:all"

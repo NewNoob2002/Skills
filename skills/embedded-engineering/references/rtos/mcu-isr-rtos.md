@@ -1,6 +1,6 @@
 # ISR、RTOS 与 DMA 设计（`mcu-baremetal` / `mcu-rtos`）
 
-基于 rovinax/embedded-skills（MIT）的 `embedded-isr-design` 与 `embedded-rtos-design`，结合 brunofbloq 的并发护栏与 BARR-C 6.4/6.5 修订。修订点见 §6。
+基于 rovinax/embedded-skills（MIT）的 `embedded-isr-design` 与 `embedded-rtos-design`，结合 brunofbloq 的并发护栏与 BARR-C 6.4/6.5 修订。修订点见 §7。
 
 ## 1. ISR：只捕获事件，不处理业务
 

@@ -5,6 +5,8 @@
   python3 tools/validate_skill.py [SKILL_DIR ...] [--doc FILE ...] [--config FILE | --no-config] [--json]
 
 不带参数时检查 skills/ 下每个含 SKILL.md 的目录，以及仓库根的 README.md。
+状态：PASS；FAIL（有 error 级发现）；NOT_RUN（前提不存在，如没有该文件或没有 PyYAML）；
+BLOCKED（依赖的检查失败而无法执行）。NOT_RUN 与 BLOCKED 都不是通过。
 退出码：0 没有 FAIL；1 至少一项 FAIL；2 用法或配置错误。只用标准库；PyYAML 存在时额外解析 YAML 资产。
 
 检查项（规则依据 https://agentskills.io/specification 与 Codex agents/openai.yaml 文档）：
@@ -18,6 +20,8 @@
   data-json    *.json 可解析
   data-yaml    *.yml/*.yaml/.clang-format/.clang-tidy 可解析（需要 PyYAML，否则 NOT_RUN）
   openai-yaml  agents/openai.yaml 字段、图标路径、颜色格式
+  rules        standards/rules.yaml 结构、ID 唯一、profile/来源/工具已声明、ref 章节存在、冲突双向登记
+  profiles     profiles/<id>.yaml 与 rules.yaml 声明的 profile 一一对应，引用与门禁工具存在
   hygiene      无 __pycache__/*.pyc/build 目录/编辑器残留、无超大文件、无指向技能外的符号链接
 """
 
@@ -36,12 +40,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = Path(__file__).resolve().with_name("validate_skill.json")
 
-PASS, FAIL, NOT_RUN = "PASS", "FAIL", "NOT_RUN"
+PASS, FAIL, NOT_RUN, BLOCKED = "PASS", "FAIL", "NOT_RUN", "BLOCKED"
 
 FRONTMATTER_KEYS = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SPEC_MAX_SKILL_LINES = 500  # 规范建议值；项目可在配置里收紧
-SKILL_ROOT_DIRS = ("scripts", "assets", "references", "agents")
+SKILL_ROOT_DIRS = ("scripts", "assets", "references", "agents", "standards", "profiles")
 HYGIENE_DIRS = {"__pycache__", ".git", ".pytest_cache", ".mypy_cache", "node_modules"}
 HYGIENE_DIR_RE = re.compile(r"^build(?:-.*)?$")
 HYGIENE_FILE_RE = re.compile(r"(?:\.pyc|\.pyo|\.swp|\.swo|~|\.orig|\.rej)$|^\.DS_Store$")
@@ -72,7 +76,8 @@ class Finding:
 class Check:
     id: str
     findings: list[Finding] = field(default_factory=list)
-    not_run: str | None = None
+    not_run: str | None = None   # 前提不存在（如没有该文件）而未执行
+    blocked: str | None = None   # 依赖的其他检查失败而无法执行
 
     def error(self, file: str, line: int | None, message: str) -> None:
         self.findings.append(Finding("error", file, line, message))
@@ -84,12 +89,15 @@ class Check:
     def status(self) -> str:
         if any(f.level == "error" for f in self.findings):
             return FAIL
+        if self.blocked:
+            return BLOCKED
         if self.not_run:
             return NOT_RUN
         return PASS
 
     def to_json(self) -> dict:
         return {"id": self.id, "status": self.status, "not_run_reason": self.not_run,
+                "blocked_reason": self.blocked,
                 "findings": [f.__dict__ for f in self.findings]}
 
 
@@ -106,7 +114,9 @@ def _yaml_scalar(raw: str, lineno: int):
     s = raw.strip()
     if not s or s.startswith("#"):
         return None
-    if s[0] in "[{&*!%@`":
+    if s[0] == "[":
+        return _yaml_flow_list(s, lineno)
+    if s[0] in "{&*!%@`":
         raise YamlSubsetError(f"line {lineno}: unsupported construct {s[:12]!r}")
     if s[0] == '"':
         try:
@@ -135,6 +145,31 @@ def _yaml_scalar(raw: str, lineno: int):
     if re.fullmatch(r"[-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?", s):
         return float(s)
     return s
+
+
+_FLOW_ITEM_RE = re.compile(r"""\s*("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^,\[\]{}"'#]*?)\s*(,|\])""")
+
+
+def _yaml_flow_list(s: str, lineno: int) -> list:
+    """单行流式列表，元素只能是标量：[a, "b c", 'd']。不支持嵌套。"""
+    out: list = []
+    pos = 1
+    if re.fullmatch(r"\[\s*\](?:\s+#.*)?", s):
+        return out
+    while True:
+        m = _FLOW_ITEM_RE.match(s, pos)
+        if not m:
+            raise YamlSubsetError(f"line {lineno}: unsupported flow sequence {s[:40]!r}")
+        item = m.group(1)
+        if not item:
+            raise YamlSubsetError(f"line {lineno}: empty item in flow sequence")
+        out.append(_yaml_scalar(item, lineno))
+        pos = m.end()
+        if m.group(2) == "]":
+            tail = s[pos:].strip()
+            if tail and not tail.startswith("#"):
+                raise YamlSubsetError(f"line {lineno}: trailing text after flow sequence")
+            return out
 
 
 def parse_yaml_subset(text: str):
@@ -273,17 +308,43 @@ def parse_yaml_subset(text: str):
     return value
 
 
+def _strict_pyyaml_load(yaml, text: str, all_documents: bool = False):
+    """PyYAML 默认对重复键“后者覆盖”，会掩盖错误；这里改为拒绝重复键。"""
+
+    class StrictLoader(yaml.SafeLoader):
+        pass
+
+    def construct_mapping(loader, node, deep=False):
+        keys = set()
+        for key_node, _value in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in keys:
+                raise yaml.constructor.ConstructorError(None, None, f"duplicate key {key!r}", key_node.start_mark)
+            keys.add(key)
+        return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+    StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping)
+    if all_documents:
+        return list(yaml.load_all(text, Loader=StrictLoader))  # noqa: S506 - 派生自 SafeLoader
+    return yaml.load(text, Loader=StrictLoader)  # noqa: S506 - StrictLoader 派生自 SafeLoader
+
+
 def load_yaml(text: str):
-    """先用子集解析器；不支持的写法再交给 PyYAML（若已安装）。"""
+    """先用子集解析器；只有子集不支持的写法才交给 PyYAML（若已安装）。
+
+    重复键是确定的错误，不退回 PyYAML，避免其“后者覆盖”语义把错误变成通过。
+    """
     try:
         return parse_yaml_subset(text)
     except YamlSubsetError as exc:
+        if "duplicate key" in str(exc):
+            raise
         try:
             import yaml  # type: ignore[import-not-found]
         except ImportError:
             raise exc from None
         try:
-            return yaml.safe_load(text)
+            return _strict_pyyaml_load(yaml, text)
         except yaml.YAMLError as yexc:
             raise YamlSubsetError(str(yexc)) from None
 
@@ -526,7 +587,7 @@ def check_reachability(skill: Path, linked_from_entry: set[Path], check: Check) 
 
 def check_orphans(skill: Path, check: Check) -> None:
     corpus = "\n".join(p.read_text(encoding="utf-8") for p in skill_markdown(skill))
-    for root in ("scripts", "assets"):
+    for root in ("scripts", "assets", "standards", "profiles"):
         base = skill / root
         if not base.is_dir():
             continue
@@ -575,8 +636,12 @@ def check_json(skill: Path, check: Check) -> None:
 
 
 def check_yaml_assets(skill: Path, check: Check) -> None:
+    # rules.yaml、profiles/*.yaml、agents/openai.yaml 由各自的专门检查解析，这里不重复计数
+    owned = {(skill / RULES_FILE).resolve(), (skill / "agents" / "openai.yaml").resolve()}
+    owned |= {p.resolve() for p in (skill / "profiles").glob("*.yaml")}
     files = sorted(p for p in skill.rglob("*")
-                   if p.is_file() and (p.suffix in (".yml", ".yaml") or p.name in YAML_FILE_NAMES))
+                   if p.is_file() and (p.suffix in (".yml", ".yaml") or p.name in YAML_FILE_NAMES)
+                   and p.resolve() not in owned)
     if not files:
         return
     try:
@@ -586,7 +651,7 @@ def check_yaml_assets(skill: Path, check: Check) -> None:
         return
     for path in files:
         try:
-            list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            _strict_pyyaml_load(yaml, path.read_text(encoding="utf-8"), all_documents=True)
         except yaml.YAMLError as exc:
             mark = getattr(exc, "problem_mark", None)
             check.error(str(path.relative_to(skill)), mark.line + 1 if mark else None, f"invalid YAML: {exc}")
@@ -645,6 +710,256 @@ def check_openai_yaml(skill: Path, check: Check) -> None:
                         check.warn(rel, None, f"undocumented key: dependencies.tools[{idx}].{k}")
 
 
+RULES_FILE = Path("standards") / "rules.yaml"
+RULE_ID_RE = re.compile(r"^[A-Z]{1,5}-\d{3}$")
+RULE_REQUIRED = ("id", "title", "level", "profiles", "lang", "source", "ref", "verify")
+RULE_OPTIONAL = ("when", "except", "cost", "conflicts")
+RULE_LEVELS = {"mandatory", "advisory"}
+RULE_LANGS = {"c", "cpp"}
+VERIFY_METHODS = {"auto", "review", "test", "measure"}
+RULES_TOP_KEYS = {"version", "profiles", "sources", "verify_tools", "rules"}
+TOOL_KEYS = {"path", "external", "checks"}
+PROFILE_REQUIRED = ("id", "summary", "evidence", "coding", "architecture", "references", "tests", "gates")
+REF_RE = re.compile(r"^(\S+?)(?:\s+(§\d+(?:\s*(?:[、,，/–—~-]|和|与|及|至)\s*§?\d+)*))?$")
+
+
+def _str_list(value) -> bool:
+    return isinstance(value, list) and bool(value) and all(isinstance(v, str) and v for v in value)
+
+
+def _check_ref(skill: Path, rel: str, where: str, ref: str, check: Check, cache: dict[Path, set[int]]) -> None:
+    """ref 形如 'references/c/barr-c.md §2、§4'：文件必须在技能内，§N 必须是该文件的章节。"""
+    m = REF_RE.match(ref.strip())
+    if not m:
+        check.error(rel, None, f"{where}: malformed ref {ref!r} (expected '<path> §N')")
+        return
+    target = skill / m.group(1)
+    if not target.is_file() or not inside(target, skill):
+        check.error(rel, None, f"{where}: ref file not found in skill: {m.group(1)}")
+        return
+    if m.group(2):
+        key = target.resolve()
+        if key not in cache:
+            cache[key] = section_numbers(target.read_text(encoding="utf-8"))
+        for num in map(int, re.findall(r"\d+", m.group(2))):
+            if num not in cache[key]:
+                check.error(rel, None, f"{where}: §{num} not found in {m.group(1)}")
+
+
+def load_rules(skill: Path) -> tuple[dict | None, str | None]:
+    path = skill / RULES_FILE
+    if not path.is_file():
+        return None, None
+    try:
+        return load_yaml(path.read_text(encoding="utf-8")), None
+    except YamlSubsetError as exc:
+        return None, f"cannot parse: {exc}"
+
+
+def check_rules(skill: Path, data: dict | None, parse_error: str | None, check: Check) -> None:
+    rel = str(RULES_FILE)
+    if data is None and parse_error is None:
+        check.not_run = f"no {rel}"
+        return
+    if parse_error:
+        check.error(rel, None, parse_error)
+        return
+    if not isinstance(data, dict):
+        check.error(rel, None, "top level must be a mapping")
+        return
+    for key in sorted(set(data) - RULES_TOP_KEYS):
+        check.error(rel, None, f"unknown top-level key: {key}")
+    profiles = data.get("profiles")
+    if not _str_list(profiles) or len(set(profiles)) != len(profiles):
+        check.error(rel, None, "profiles must be a non-empty list of unique names")
+        profiles = []
+    sources = data.get("sources")
+    if not isinstance(sources, dict) or not sources:
+        check.error(rel, None, "sources must be a non-empty mapping")
+        sources = {}
+    tools = data.get("verify_tools")
+    if not isinstance(tools, dict):
+        check.error(rel, None, "verify_tools must be a mapping")
+        tools = {}
+    tool_checks: dict[str, set[str] | None] = {}
+    tool_text: dict[str, str] = {}
+    for name, spec in tools.items():
+        where = f"verify_tools.{name}"
+        if not isinstance(spec, dict) or set(spec) - TOOL_KEYS:
+            check.error(rel, None, f"{where}: must be a mapping of {sorted(TOOL_KEYS)}")
+            continue
+        if ("path" in spec) == ("external" in spec):
+            check.error(rel, None, f"{where}: give exactly one of path / external")
+            continue
+        if "path" in spec:
+            target = skill / str(spec["path"])
+            if not target.is_file() or not inside(target, skill):
+                check.error(rel, None, f"{where}: path not found in skill: {spec['path']}")
+            elif target.suffix in (".md", "") or target.name.startswith("."):
+                tool_text[name] = target.read_text(encoding="utf-8")
+        if "checks" in spec:
+            if not _str_list(spec["checks"]):
+                check.error(rel, None, f"{where}.checks must be a non-empty list of strings")
+            else:
+                tool_checks[name] = set(spec["checks"])
+        else:
+            tool_checks[name] = None
+
+    rules = data.get("rules")
+    if not isinstance(rules, list) or not rules:
+        check.error(rel, None, "rules must be a non-empty list")
+        return
+    seen: dict[str, dict] = {}
+    cache: dict[Path, set[int]] = {}
+    for idx, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            check.error(rel, None, f"rules[{idx}] must be a mapping")
+            continue
+        rid = rule.get("id")
+        where = rid if isinstance(rid, str) else f"rules[{idx}]"
+        if not isinstance(rid, str) or not RULE_ID_RE.match(rid):
+            check.error(rel, None, f"{where}: id must match {RULE_ID_RE.pattern}")
+        elif rid in seen:
+            check.error(rel, None, f"{rid}: duplicate id")
+        else:
+            seen[rid] = rule
+        for key in RULE_REQUIRED:
+            if key not in rule:
+                check.error(rel, None, f"{where}: missing {key}")
+        for key in sorted(set(rule) - set(RULE_REQUIRED) - set(RULE_OPTIONAL)):
+            check.error(rel, None, f"{where}: unknown key {key}")
+        for key in ("title", "when", "except", "cost"):
+            if key in rule and not (isinstance(rule[key], str) and rule[key].strip()):
+                check.error(rel, None, f"{where}: {key} must be a non-empty string")
+        if "level" in rule and rule["level"] not in RULE_LEVELS:
+            check.error(rel, None, f"{where}: level must be one of {sorted(RULE_LEVELS)}")
+        rp = rule.get("profiles")
+        if "profiles" in rule:
+            if not _str_list(rp):
+                check.error(rel, None, f"{where}: profiles must be a non-empty list")
+            elif rp != ["all"]:
+                for p in rp:
+                    if p not in profiles:
+                        check.error(rel, None, f"{where}: unknown profile {p!r}")
+        rl = rule.get("lang")
+        if "lang" in rule and not (_str_list(rl) and set(rl) <= RULE_LANGS):
+            check.error(rel, None, f"{where}: lang must be a list from {sorted(RULE_LANGS)}")
+        rs = rule.get("source")
+        if "source" in rule:
+            if not _str_list(rs):
+                check.error(rel, None, f"{where}: source must be a non-empty list")
+            else:
+                for s in rs:
+                    if s not in sources:
+                        check.error(rel, None, f"{where}: undeclared source {s!r}")
+        refs = rule.get("ref")
+        if "ref" in rule:
+            ref_list = [refs] if isinstance(refs, str) else refs
+            if not _str_list(ref_list):
+                check.error(rel, None, f"{where}: ref must be a string or list of strings")
+            else:
+                for ref in ref_list:
+                    _check_ref(skill, rel, where, ref, check, cache)
+        verify = rule.get("verify")
+        if "verify" in rule:
+            if not isinstance(verify, dict) or set(verify) - {"method", "tool", "check"}:
+                check.error(rel, None, f"{where}: verify must be a mapping of method/tool/check")
+            else:
+                method, tool = verify.get("method"), verify.get("tool")
+                if method not in VERIFY_METHODS:
+                    check.error(rel, None, f"{where}: verify.method must be one of {sorted(VERIFY_METHODS)}")
+                if method == "auto" and not tool:
+                    check.error(rel, None, f"{where}: verify.method auto requires verify.tool")
+                if tool is not None and tool not in tools:
+                    check.error(rel, None, f"{where}: undeclared verify.tool {tool!r}")
+                elif tool is not None and "check" in verify:
+                    allowed = tool_checks.get(tool)
+                    item = str(verify["check"])
+                    if allowed is not None and item not in allowed:
+                        check.error(rel, None, f"{where}: {tool} has no check {item!r} (declared: {sorted(allowed)})")
+                    elif allowed is None and tool in tool_text and item not in tool_text[tool]:
+                        check.error(rel, None, f"{where}: {item!r} does not appear in {tools[tool].get('path')}")
+                elif "check" in verify and tool is None:
+                    check.error(rel, None, f"{where}: verify.check requires verify.tool")
+        if "conflicts" in rule and not _str_list(rule["conflicts"]):
+            check.error(rel, None, f"{where}: conflicts must be a non-empty list of rule ids")
+
+    for rid, rule in seen.items():
+        for other in rule.get("conflicts") or []:
+            if not isinstance(other, str):
+                continue
+            if other == rid:
+                check.error(rel, None, f"{rid}: conflicts with itself")
+            elif other not in seen:
+                check.error(rel, None, f"{rid}: conflicts with unknown rule {other}")
+            elif rid not in (seen[other].get("conflicts") or []):
+                check.error(rel, None, f"{rid}: conflict with {other} is not listed on {other}")
+
+
+def check_profiles(skill: Path, data: dict | None, rules_error: str | None, check: Check) -> None:
+    pdir = skill / "profiles"
+    if rules_error is not None or (data is not None and not isinstance(data, dict)):
+        check.blocked = "standards/rules.yaml is invalid (see rules)"
+        return
+    if not isinstance(data, dict):
+        if pdir.is_dir():
+            check.error("profiles/", None, "profiles/ exists but standards/rules.yaml is missing")
+        else:
+            check.not_run = "no standards/rules.yaml"
+        return
+    declared = data.get("profiles") if _str_list(data.get("profiles")) else []
+    tools = data.get("verify_tools") if isinstance(data.get("verify_tools"), dict) else {}
+    if not pdir.is_dir():
+        check.error("profiles/", None, "standards/rules.yaml declares profiles but profiles/ is missing")
+        return
+    files = {p.stem: p for p in pdir.glob("*.yaml")}
+    for name in declared:
+        if name not in files:
+            check.error(f"profiles/{name}.yaml", None, "declared in rules.yaml but file is missing")
+    for stem, path in sorted(files.items()):
+        rel = f"profiles/{path.name}"
+        if stem not in declared:
+            check.error(rel, None, "not declared in standards/rules.yaml profiles")
+        try:
+            prof = load_yaml(path.read_text(encoding="utf-8"))
+        except YamlSubsetError as exc:
+            check.error(rel, None, f"cannot parse: {exc}")
+            continue
+        if not isinstance(prof, dict):
+            check.error(rel, None, "top level must be a mapping")
+            continue
+        for key in PROFILE_REQUIRED:
+            if key not in prof:
+                check.error(rel, None, f"missing {key}")
+        for key in sorted(set(prof) - set(PROFILE_REQUIRED)):
+            check.error(rel, None, f"unknown key {key}")
+        if prof.get("id") != stem:
+            check.error(rel, None, f"id {prof.get('id')!r} does not match file name")
+        refs = prof.get("references")
+        if "references" in prof:
+            if not _str_list(refs):
+                check.error(rel, None, "references must be a non-empty list")
+            else:
+                for ref in refs:
+                    if not (skill / ref).is_file():
+                        check.error(rel, None, f"reference not found: {ref}")
+        for key in ("coding", "tests"):
+            val = prof.get(key)
+            if key in prof and not (isinstance(val, dict) and val
+                                    and all(isinstance(v, str) and v for v in val.values())):
+                check.error(rel, None, f"{key} must be a non-empty mapping of strings")
+        gates = prof.get("gates")
+        if "gates" in prof:
+            if not isinstance(gates, list) or not gates:
+                check.error(rel, None, "gates must be a non-empty list")
+            else:
+                for idx, gate in enumerate(gates):
+                    if not isinstance(gate, dict) or set(gate) != {"tool", "run"}:
+                        check.error(rel, None, f"gates[{idx}] must have exactly tool and run")
+                    elif gate["tool"] not in tools:
+                        check.error(rel, None, f"gates[{idx}]: tool {gate['tool']!r} not in verify_tools")
+
+
 def is_hygiene_violation(path: Path) -> bool:
     if path.is_dir() and not path.is_symlink():
         return path.name in HYGIENE_DIRS or HYGIENE_DIR_RE.match(path.name) is not None
@@ -677,7 +992,8 @@ def check_hygiene(skill: Path, cfg: dict, check: Check) -> None:
 
 def validate_skill(skill: Path, cfg: dict) -> dict:
     checks = {cid: Check(cid) for cid in ("frontmatter", "links", "paths", "sections", "reachability", "orphans",
-                                          "scripts", "data-json", "data-yaml", "openai-yaml", "hygiene")}
+                                          "scripts", "data-json", "data-yaml", "openai-yaml", "rules",
+                                          "profiles", "hygiene")}
     check_hygiene(skill, cfg, checks["hygiene"])
     meta = check_frontmatter(skill, cfg, checks["frontmatter"])
     ctx = RefContext(rel_base=skill, skill_roots=[skill], confine=skill, local_dirs=False,
@@ -701,6 +1017,9 @@ def validate_skill(skill: Path, cfg: dict) -> dict:
     check_json(skill, checks["data-json"])
     check_yaml_assets(skill, checks["data-yaml"])
     check_openai_yaml(skill, checks["openai-yaml"])
+    rules, rules_error = load_rules(skill)
+    check_rules(skill, rules, rules_error, checks["rules"])
+    check_profiles(skill, rules, rules_error, checks["profiles"])
     name = meta.get("name") if isinstance(meta, dict) else None
     return {"kind": "skill", "name": name or skill.name, "path": str(skill),
             "checks": [c.to_json() for c in checks.values()]}
@@ -740,7 +1059,7 @@ def render_text(results: list[dict]) -> str:
         for chk in res["checks"]:
             errors = sum(f["level"] == "error" for f in chk["findings"])
             warns = len(chk["findings"]) - errors
-            note = chk["not_run_reason"] or ""
+            note = chk["blocked_reason"] or chk["not_run_reason"] or ""
             if errors or warns:
                 note = f"{errors} error(s), {warns} warning(s)" + (f"; {note}" if note else "")
             out.append(f"  {chk['status']:<8} {chk['id']:<13} {note}".rstrip())
@@ -753,7 +1072,7 @@ def render_text(results: list[dict]) -> str:
 
 
 def summarize(results: list[dict]) -> dict:
-    totals = {PASS: 0, FAIL: 0, NOT_RUN: 0}
+    totals = {PASS: 0, FAIL: 0, NOT_RUN: 0, BLOCKED: 0}
     for res in results:
         for chk in res["checks"]:
             totals[chk["status"]] += 1

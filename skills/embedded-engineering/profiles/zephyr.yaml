@@ -1,0 +1,21 @@
+# profile：zephyr。适用规则 = standards/rules.yaml 中 profiles 含本 id 或 all 的条目。
+id: zephyr
+summary: "Zephyr RTOS 应用、驱动与模块"
+evidence: "scripts/detect_profile.py：west.yml、prj.conf、zephyr/module.yml、find_package(Zephyr)、*.overlay、testcase.yaml"
+coding:
+  c: "Zephyr 官方 code style 与 Coding Guidelines（MISRA C:2012 子集）；BARR-C 只取不冲突的安全核心"
+  cpp: "只在应用层；内核、驱动、SYS_INIT 保持 C"
+architecture: "Zephyr 设备模型：devicetree 描述硬件、Kconfig 配置、子系统 API"
+references:
+  - references/platforms/zephyr.md
+  - references/profiles.md
+  - references/cpp/coding.md
+tests:
+  c: "ztest + Twister"
+  cpp: "ztest + Twister；不依赖 Zephyr API 的纯逻辑可额外用 CppUTest"
+  target: "native_sim 或目标板；Twister 只在 Linux 上完整支持"
+gates:
+  - tool: zephyr_compliance
+    run: "./scripts/ci/check_compliance.py -c origin/main..HEAD（Zephyr 树内）"
+  - tool: twister
+    run: "west twister -T <tests/dir>"

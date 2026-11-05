@@ -1,6 +1,6 @@
 # MCU 固件架构（`mcu-baremetal` / `mcu-rtos`）
 
-基于 rovinax/embedded-skills（MIT）的 `embedded-architecture` 与 `embedded-driver-design`，按 BARR-C 与实际工程做了修订，修订点见 §7。Zephyr 与 Linux profile **不适用**本文件的目录结构，见 §6。
+基于 rovinax/embedded-skills（MIT）的 `embedded-architecture` 与 `embedded-driver-design`，按 BARR-C 与实际工程做了修订，修订点见 §8。Zephyr 与 Linux profile **不适用**本文件的目录结构，见 §6。
 
 ## 1. 原则
 

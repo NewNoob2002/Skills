@@ -1,0 +1,1278 @@
+# embedded-engineering 规则库（机器可读）
+#
+# 收录范围：能被工具检查的规则、跨生态有冲突的规则、需要在审查/验证样例中按 ID 引用的规则。
+# 不重复 references/ 的全文；每条规则用 ref 指回出处章节，细节以 references/ 为准。
+#
+# 字段：
+#   id        <域>-<三位序号>，永不复用
+#   title     一句话规则
+#   level     mandatory（违反即 FAIL）| advisory（偏离需在报告中说明理由）
+#   profiles  适用 profile，或 [all]
+#   lang      [c] / [cpp] / [c, cpp]
+#   source    规则来源（sources 中的键）
+#   ref       出处：<技能内路径> §N（多处用列表）
+#   when      适用条件（可选）
+#   except    例外（可选）
+#   verify    method: auto | review | test | measure；auto 必须给 tool，可给 check（工具内的检查项）
+#   cost      遵守该规则的运行期/资源代价（可选）
+#   conflicts 与之冲突、按 profile 裁决的规则 ID（可选，必须双向登记）
+#
+# 由 tools/validate_skill.py 的 rules 检查校验结构、引用与冲突对称性。
+
+version: 1
+
+profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-kernel, linux-userspace]
+
+sources:
+  skill: "本技能的护栏与工作流（brunofbloq/embedded-agent-skills 结构，独立改写）"
+  rovinax: "rovinax/embedded-skills（MIT），按 BARR-C 与实际工程修订"
+  barr-c: "BARR-C:2018 Embedded C Coding Standard 与 Barr Group enforcement kit"
+  freertos: "FreeRTOS 官方文档（Cortex-M 中断优先级、FromISR API、静态分配）"
+  cmsis-rtos2: "CMSIS-RTOS2 API 文档（ISR 中可调用函数与超时约束）"
+  zephyr: "Zephyr 官方 Code Style / Coding Guidelines / Contribution Guidelines / ztest 文档"
+  linux: "Linux 内核树 Documentation/process/ 与 dev-tools/kunit/"
+  core-guidelines: "C++ Core Guidelines"
+  pigweed: "Pigweed embedded C++ guide 与 size optimizations"
+  modm: "modm 编译期外设校验"
+  etl: "ETL 固定容量容器与 ISR 队列"
+  measured: "本技能在 Cortex-M0+/M4 上实测的开销数据（references/cpp/features.md §4）"
+  posix: "POSIX / Linux man-pages（系统调用语义、async-signal-safe）"
+
+verify_tools:
+  arch_lint:
+    path: scripts/arch_lint.py
+    checks: [layer_dependency, forbidden_include, hal_call, register_access, cycle]
+  barrc_check:
+    path: scripts/barrc/check.sh
+  c_compiler_flags:
+    path: assets/barr-c/COMPILER_FLAGS.md
+  cpp_compiler_flags:
+    path: assets/cpp/compile_flags.md
+  cpp_cost:
+    path: scripts/cpp_cost.py
+    checks: [exceptions, rtti, heap, static_dtor, local_static_guard, throw_helpers, stdio_format, iostream, atomic_libcall, budget, diff]
+  clang_tidy_cpp:
+    path: assets/cpp/.clang-tidy
+  negative_compile:
+    path: references/verification/cpp-testing.md
+  ceedling:
+    path: references/verification/ceedling.md
+  cpputest:
+    path: references/verification/cpp-testing.md
+  zephyr_compliance:
+    external: "Zephyr 树 ./scripts/ci/check_compliance.py -c <range>"
+  twister:
+    external: "west twister -T <dir>"
+  checkpatch:
+    external: "Linux 树 ./scripts/checkpatch.pl --strict"
+  kernel_build:
+    external: "make W=1 与 make C=1（sparse）"
+  dt_binding_check:
+    external: "make dt_binding_check / dtbs_check"
+  kunit:
+    external: "./tools/testing/kunit/kunit.py run"
+  sanitizers:
+    external: "-fsanitize=address,undefined 的 host 构建"
+
+rules:
+  # ---------------------------------------------------------------- GEN：全 profile 的护栏与流程
+  - id: GEN-001
+    title: "flash、擦除、eFuse/OTP、option bytes、secure boot、驱动执行器或电源前，必须取得覆盖目标与影响范围的明确授权并说明恢复路径"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill]
+    ref: SKILL.md §0
+    verify:
+      method: review
+
+  - id: GEN-002
+    title: "寄存器、位域、时钟、引脚复用、DMA 通道、errata、SDK API 必须有仓库内或数据手册来源；查不到标 UNKNOWN 并提问"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill]
+    ref: [SKILL.md §0, references/workflows/workflow.md §4]
+    verify:
+      method: review
+
+  - id: GEN-003
+    title: "host、静态、仿真、HIL、实测各自报告 PASS/FAIL/NOT_RUN/BLOCKED；未执行不得记为通过，仿真通过不等于硬件通过"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill]
+    ref: [SKILL.md §0, references/workflows/workflow.md §5]
+    verify:
+      method: review
+
+  - id: GEN-004
+    title: "Agent 不添加 Signed-off-by；生成代码记录工具与模型，并由具名人类作者审查负责"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill, zephyr, linux, barr-c]
+    ref: [SKILL.md §0, references/platforms/zephyr.md §5, references/platforms/linux-kernel.md §5, references/c/barr-c.md §6]
+    verify:
+      method: review
+
+  - id: GEN-005
+    title: "Full 深度的架构评审在 Phase 1 结束时必须取得明确批准才能进入实现"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill]
+    ref: references/workflows/workflow.md §1
+    except: "Fast path（孤立缺陷）不需要架构门"
+    verify:
+      method: review
+
+  - id: GEN-006
+    title: "测试 oracle 来自需求、规格或测试向量，不复制实现的输出"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill]
+    ref: references/workflows/workflow.md §5
+    verify:
+      method: review
+
+  - id: GEN-007
+    title: "厂商生成代码（CubeMX、MCUXpresso、platform/）不重排、不格式化，只在 USER CODE 保护区修改，并排除出格式门禁"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    lang: [c, cpp]
+    source: [skill]
+    ref: references/profiles.md §4
+    verify:
+      method: review
+
+  - id: GEN-008
+    title: "向 Zephyr、Linux 主线或厂商上游提交的代码只使用该上游规范，不混入 BARR-C 格式或 g_ 前缀"
+    level: mandatory
+    profiles: [zephyr, linux-kernel]
+    lang: [c]
+    source: [skill, zephyr, linux]
+    ref: references/profiles.md §4
+    verify:
+      method: review
+
+  - id: GEN-009
+    title: "所有等待外设的操作有界；超时所用时钟在该启动/休眠阶段有效；tick 比较处理回绕"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill, rovinax]
+    ref: [references/workflows/workflow.md §4, references/rtos/mcu-isr-rtos.md §4]
+    verify:
+      method: test
+    cost: "每个等待点需要超时分支与错误码"
+
+  - id: GEN-010
+    title: "外部输入（总线、网络、串口、文件、环境变量）在使用前校验长度与范围"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [barr-c, zephyr, posix]
+    ref: [references/platforms/linux-userspace.md §2, references/platforms/zephyr.md §2]
+    verify:
+      method: test
+
+  # ---------------------------------------------------------------- ARCH：MCU 分层架构
+  - id: ARCH-001
+    title: "#include 方向符合层规则：app → module → interface ← bsp/driver → platform"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/architecture/mcu-architecture.md §3
+    verify:
+      method: auto
+      tool: arch_lint
+      check: layer_dependency
+
+  - id: ARCH-002
+    title: "app、module、interface、driver/device 不包含厂商 HAL/CMSIS/设备头"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/architecture/mcu-architecture.md §3
+    verify:
+      method: auto
+      tool: arch_lint
+      check: forbidden_include
+
+  - id: ARCH-003
+    title: "module、interface、driver/device 不直接包含 RTOS 头；同步原语经 OSAL 接口或模板参数注入"
+    level: mandatory
+    profiles: [mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/architecture/mcu-architecture.md §3
+    verify:
+      method: auto
+      tool: arch_lint
+      check: forbidden_include
+
+  - id: ARCH-004
+    title: "app、module、interface、driver/device 中不调用 HAL/LL/nrfx 函数"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/architecture/mcu-architecture.md §3
+    verify:
+      method: auto
+      tool: arch_lint
+      check: hal_call
+
+  - id: ARCH-005
+    title: "app、module、interface、driver/device 中不出现 PERIPH->REG 形式的寄存器访问"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/architecture/mcu-architecture.md §3
+    verify:
+      method: auto
+      tool: arch_lint
+      check: register_access
+
+  - id: ARCH-006
+    title: "module 子模块之间无循环依赖"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/architecture/mcu-architecture.md §3
+    verify:
+      method: auto
+      tool: arch_lint
+      check: cycle
+
+  - id: ARCH-007
+    title: "器件驱动状态放在设备上下文结构体中，不用文件级全局状态；初始化分阶段且逐步检查返回值"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/architecture/mcu-architecture.md §4
+    verify:
+      method: review
+    cost: "每次调用多传一个上下文指针"
+
+  - id: ARCH-008
+    title: "驱动的 host 测试 mock 总线接口头，而不是 HAL"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/architecture/mcu-architecture.md §4
+    verify:
+      method: review
+
+  # ---------------------------------------------------------------- C：BARR-C 安全核心（与格式无关）
+  - id: C-001
+    title: "volatile 不用于线程/任务同步；多字节、读-改-写、多核共享用临界区、RTOS 原语或原子类型"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [barr-c, linux, core-guidelines]
+    ref: [references/c/barr-c.md §2, references/rtos/mcu-isr-rtos.md §2, references/profiles.md §3]
+    verify:
+      method: review
+
+  - id: C-002
+    title: "模块外不需要的函数和变量一律 static；私有函数 static，公共函数在头文件中有原型"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    lang: [c]
+    source: [barr-c]
+    ref: references/c/barr-c.md §2
+    verify:
+      method: review
+
+  - id: C-003
+    title: "不注释掉代码；临时禁用用 #if 0"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    lang: [c, cpp]
+    source: [barr-c, zephyr]
+    ref: [references/c/barr-c.md §2, references/platforms/zephyr.md §2]
+    verify:
+      method: review
+
+  - id: C-004
+    title: "整数宽度重要时用 stdint.h 定宽类型；char 只用于字符"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    lang: [c]
+    source: [barr-c, zephyr]
+    ref: references/c/barr-c.md §2
+    verify:
+      method: review
+
+  - id: C-005
+    title: "位运算符不作用于有符号操作数"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: references/c/barr-c.md §2
+    verify:
+      method: auto
+      tool: barrc_check
+
+  - id: C-006
+    title: "比较与算术中不混用有符号与无符号"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §2, references/c/barr-c.md §4]
+    verify:
+      method: auto
+      tool: c_compiler_flags
+      check: "-Wsign-compare"
+
+  - id: C-007
+    title: "不对浮点做 == / != 比较"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    lang: [c, cpp]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §2, references/c/barr-c.md §4]
+    verify:
+      method: auto
+      tool: c_compiler_flags
+      check: "-Wfloat-equal"
+
+  - id: C-008
+    title: "映射硬件寄存器或通信帧的结构体防止填充与位序变化，并用 static_assert(sizeof) 校验"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §2, references/c/barr-c.md §5]
+    verify:
+      method: review
+
+  - id: C-009
+    title: "能写成函数就不用带参宏；带参宏整体与每个参数加括号、参数只用一次、不含控制转移"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: references/c/barr-c.md §2
+    verify:
+      method: auto
+      tool: barrc_check
+
+  - id: C-010
+    title: "变量使用前初始化；尚无地址的指针初始化为 NULL"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    lang: [c]
+    source: [barr-c]
+    ref: references/c/barr-c.md §2
+    verify:
+      method: auto
+      tool: c_compiler_flags
+      check: "-Wall"
+
+  - id: C-011
+    title: "if / else if 条件中不赋值"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §2, references/c/barr-c.md §4]
+    verify:
+      method: auto
+      tool: c_compiler_flags
+      check: "-Werror=parentheses"
+
+  - id: C-012
+    title: "每个 switch 有 default"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    lang: [c]
+    source: [barr-c]
+    ref: references/c/barr-c.md §2
+    verify:
+      method: auto
+      tool: c_compiler_flags
+      check: "-Wswitch-default"
+
+  - id: C-013
+    title: "有意的 switch 贯穿必须用平台方式标注：BARR-C 注释、Zephyr __fallthrough、Linux fallthrough;"
+    level: mandatory
+    profiles: [all]
+    lang: [c]
+    source: [barr-c, zephyr, linux]
+    ref: [references/c/barr-c.md §2, references/profiles.md §3]
+    verify:
+      method: auto
+      tool: c_compiler_flags
+      check: "-Wimplicit-fallthrough"
+
+  - id: C-014
+    title: "禁止隐式函数声明"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    lang: [c]
+    source: [barr-c]
+    ref: references/c/barr-c.md §4
+    verify:
+      method: auto
+      tool: c_compiler_flags
+      check: "-Werror=implicit-function-declaration"
+
+  - id: C-015
+    title: "不调用 abort、exit、setjmp、longjmp"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: references/c/barr-c.md §2
+    verify:
+      method: auto
+      tool: barrc_check
+
+  - id: C-016
+    title: "头文件用 #ifndef guard，不用 #pragma once"
+    level: mandatory
+    profiles: [all]
+    lang: [c]
+    source: [barr-c, zephyr, linux]
+    ref: [references/c/barr-c.md §2, references/profiles.md §3]
+    verify:
+      method: review
+
+  - id: C-017
+    title: "每个强制类型转换配注释说明数值范围为何安全"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: references/c/barr-c.md §2
+    verify:
+      method: review
+
+  - id: C-018
+    title: "以 C99 编写并用 -std=c99 锁定方言"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: references/c/barr-c.md §2
+    except: "项目已明确选用更新的 C 标准时按项目"
+    verify:
+      method: auto
+      tool: c_compiler_flags
+      check: "-std=c99"
+
+  # ---------------------------------------------------------------- CFMT：BARR-C 格式与命名层（与 Zephyr/Linux 冲突）
+  - id: CFMT-001
+    title: "BARR-C 布局：4 空格缩进、禁止 tab、Allman 花括号、行宽 80、只用 LF"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §3, references/profiles.md §3]
+    when: "linux-userspace 项目未定义风格且选用 BARR-C 格式层时同样适用"
+    verify:
+      method: auto
+      tool: barrc_check
+    conflicts: [ZEP-001, LNXK-001]
+
+  - id: CFMT-002
+    title: "所有 if/else/for/while/do/switch 体加花括号，单语句也加"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §3, references/profiles.md §3]
+    verify:
+      method: auto
+      tool: barrc_check
+    conflicts: [LNXK-001]
+
+  - id: CFMT-003
+    title: "命名前缀：全局 g_、指针 p_/pp_、布尔 b_、句柄 h_"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §3, references/profiles.md §3]
+    verify:
+      method: auto
+      tool: barrc_check
+    conflicts: [LNXK-002]
+
+  - id: CFMT-004
+    title: "变量与常量比较时常量在左（NULL == p_buf）"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §3, references/profiles.md §3]
+    verify:
+      method: review
+    conflicts: [LNXK-001]
+
+  - id: CFMT-005
+    title: "不使用 short / long，用定宽类型"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §3, references/profiles.md §3]
+    verify:
+      method: auto
+      tool: barrc_check
+    conflicts: [LNXK-001]
+
+  - id: CFMT-006
+    title: "尽量不用 goto"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §3, references/profiles.md §3]
+    verify:
+      method: auto
+      tool: barrc_check
+    conflicts: [LNXK-003]
+
+  - id: CFMT-007
+    title: "自写 ISR 名以 _isr 结尾并声明为 static；向量表固定名只做一行转发"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c]
+    source: [barr-c]
+    ref: [references/c/barr-c.md §3, references/rtos/mcu-isr-rtos.md §1]
+    except: "启动文件要求的向量名（如 USART1_IRQHandler）作为记录在案的例外"
+    verify:
+      method: review
+
+  # ---------------------------------------------------------------- ISR / RTOS / DMA
+  - id: ISR-001
+    title: "ISR 只捕获事件：不解析协议、不做控制计算、不打日志、不分配内存、不阻塞、不调用非 ISR 安全 API"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax, barr-c]
+    ref: [references/rtos/mcu-isr-rtos.md §1, references/cpp/coding.md §7]
+    verify:
+      method: review
+
+  - id: ISR-002
+    title: "写 1 清除（W1C）的状态寄存器直接赋值，不用 |= 读-改-写"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/rtos/mcu-isr-rtos.md §2
+    verify:
+      method: review
+
+  - id: ISR-003
+    title: "ISR 与任务共享数据优先用队列、SPSC 环形缓冲或任务通知；多字节数据不能只靠 volatile"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax, barr-c]
+    ref: references/rtos/mcu-isr-rtos.md §2
+    verify:
+      method: review
+
+  - id: ISR-004
+    title: "FreeRTOS 的 ISR 只用 FromISR API 并以 portYIELD_FROM_ISR 结束；CMSIS-RTOS2 在 ISR 中调用时超时必须为 0"
+    level: mandatory
+    profiles: [mcu-rtos]
+    lang: [c, cpp]
+    source: [freertos, cmsis-rtos2]
+    ref: references/rtos/mcu-isr-rtos.md §3
+    verify:
+      method: review
+
+  - id: ISR-005
+    title: "调用 FreeRTOS API 的中断，优先级数值不小于 configMAX_SYSCALL_INTERRUPT_PRIORITY，并开启 configASSERT"
+    level: mandatory
+    profiles: [mcu-rtos]
+    lang: [c, cpp]
+    source: [freertos]
+    ref: references/rtos/mcu-isr-rtos.md §3
+    verify:
+      method: review
+
+  - id: ISR-006
+    title: "每个 ISR 按项目截止期限设定时间预算并实测（GPIO 打点、DWT CYCCNT 或 trace），未测记 NOT_RUN"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: [references/rtos/mcu-isr-rtos.md §1, references/verification/cpp-testing.md §7]
+    verify:
+      method: measure
+
+  - id: ISR-007
+    title: "未使用的中断向量安装默认 stub，进入安全态并记录故障"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [barr-c]
+    ref: references/rtos/mcu-isr-rtos.md §1
+    verify:
+      method: review
+
+  - id: RTOS-001
+    title: "周期任务用绝对时间延时（xTaskDelayUntil / osDelayUntil），不用累积漂移的相对延时"
+    level: mandatory
+    profiles: [mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax, freertos]
+    ref: references/rtos/mcu-isr-rtos.md §4
+    verify:
+      method: review
+
+  - id: RTOS-002
+    title: "每个任务有栈预算，开启栈溢出检测，并用水位线实测余量"
+    level: mandatory
+    profiles: [mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax, freertos]
+    ref: [references/rtos/mcu-isr-rtos.md §4, references/cpp/coding.md §6]
+    verify:
+      method: measure
+    cost: "溢出检测在每次上下文切换增加少量检查"
+
+  - id: RTOS-003
+    title: "内核对象静态创建，初始化完成后不再动态分配"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax, freertos]
+    ref: references/rtos/mcu-isr-rtos.md §4
+    verify:
+      method: review
+    cost: "RAM 在链接期全部占用，无法复用"
+
+  - id: RTOS-004
+    title: "每个外设或总线只有一个所有者任务，其他任务经所有者的 API 或队列访问"
+    level: advisory
+    profiles: [mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/rtos/mcu-isr-rtos.md §4
+    verify:
+      method: review
+
+  - id: RTOS-005
+    title: "看门狗只在验证各关键子系统本周期都有进展后才喂狗，不在定时器 ISR 中无条件喂狗"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/rtos/mcu-isr-rtos.md §5
+    verify:
+      method: review
+
+  - id: DMA-001
+    title: "有 D-cache 时 DMA 缓冲区按 cache line 对齐，发送前 clean、接收后 invalidate，或放在 non-cacheable 区"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: [references/rtos/mcu-isr-rtos.md §5, references/cpp/coding.md §7]
+    when: "内核有数据 cache（如 Cortex-M7）"
+    verify:
+      method: review
+    cost: "对齐填充占用 RAM；cache 维护占用 CPU 周期"
+
+  - id: DMA-002
+    title: "DMA 完成中断只通知任务，数据处理在任务中；缓冲区生命周期覆盖整个传输"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [rovinax]
+    ref: references/rtos/mcu-isr-rtos.md §5
+    verify:
+      method: review
+
+  # ---------------------------------------------------------------- CPP：资源等级 T0–T3 下的特性取舍
+  - id: CPP-001
+    title: "T0–T2 构建使用 -fno-exceptions -fno-rtti -fno-use-cxa-atexit，链接产物中不出现异常与 RTTI 运行时"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [pigweed, measured]
+    ref: [references/cpp/coding.md §2, references/cpp/features.md §3]
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: exceptions
+    cost: "异常 +9877 B Flash、+460 B RAM（Cortex-M4 实测）"
+
+  - id: CPP-002
+    title: "T0–T2 链接产物中不出现 RTTI 类型信息"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [pigweed, measured]
+    ref: references/cpp/features.md §3
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: rtti
+
+  - id: CPP-003
+    title: "堆：T0 禁止；T1 仅初始化期并随后锁定；T2 注入分配器或池；ISR 与 RT 路径禁止"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [pigweed, core-guidelines]
+    ref: [references/cpp/coding.md §6, references/cpp/features.md §2]
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: heap
+
+  - id: CPP-004
+    title: "T0–T2 不用 std::function，用 etl::delegate / etl::inplace_function / pw::Function"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [pigweed, etl, measured]
+    ref: references/cpp/features.md §3
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: throw_helpers
+    cost: "std::function +1148 B 并拉入 malloc、atexit；etl::delegate +72 B"
+
+  - id: CPP-005
+    title: "T0–T2 不用会分配的标准容器（vector/string/map/list/deque/unordered_*），用 ETL 固定容量容器"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [etl, measured]
+    ref: references/cpp/features.md §3
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: heap
+    cost: "std::vector +1030 B；etl::vector<T,N> +48 B 但容量在编译期固定"
+
+  - id: CPP-006
+    title: "T0–T2 不用 iostream"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [pigweed, measured]
+    ref: references/cpp/features.md §3
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: iostream
+
+  - id: CPP-007
+    title: "printf 族：T0 禁止，T1/T2 只在非 RT 路径使用，优先令牌化日志"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [pigweed, measured]
+    ref: references/cpp/features.md §3
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: stdio_format
+    cost: "printf +3932 B、snprintf +2611 B，均拉入 malloc"
+
+  - id: CPP-008
+    title: "ISR/线程共享的原子类型写 static_assert(is_always_lock_free)；ARMv6-M 上的 RMW 与 32 位 MCU 上的 64 位原子改用临界区"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [measured, core-guidelines]
+    ref: [references/cpp/coding.md §7, references/cpp/features.md §3]
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: atomic_libcall
+
+  - id: CPP-009
+    title: "函数局部静态的动态初始化：T0 禁止；其他等级只在调度器启动前首次触达，绝不在 ISR 中首次触达"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [core-guidelines, measured]
+    ref: references/cpp/coding.md §6
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: local_static_guard
+
+  - id: CPP-010
+    title: "全局对象用 constinit/constexpr 构造；构造函数不访问硬件、RTOS 或日志，硬件在显式 init() 中初始化"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [core-guidelines, pigweed]
+    ref: references/cpp/coding.md §6
+    verify:
+      method: review
+
+  - id: CPP-011
+    title: "多态基类用受保护非虚析构 + final 实现；virtual 只用于运行期选择的边界"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [core-guidelines, measured]
+    ref: [references/cpp/features.md §3, references/cpp/patterns.md §3]
+    verify:
+      method: review
+    cost: "公有虚析构 +340 B Flash、+412 B RAM（拉入 operator delete → malloc/free）"
+
+  - id: CPP-012
+    title: "volatile 只用于 MMIO 与 DMA 描述符；不使用 volatile 复合运算（C++20 已弃用）"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    lang: [cpp]
+    source: [core-guidelines]
+    ref: [references/cpp/coding.md §7, references/cpp/features.md §3]
+    verify:
+      method: auto
+      tool: cpp_compiler_flags
+      check: "-Wvolatile"
+
+  - id: CPP-013
+    title: "ISR 向量 extern \"C\" 且名字与启动文件一致；C 回调用 noexcept 静态蹦床；跨边界类型为标准布局"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [core-guidelines, pigweed]
+    ref: [references/cpp/coding.md §8, references/cpp/patterns.md §7]
+    verify:
+      method: review
+
+  - id: CPP-014
+    title: "SDK 错误码在 bsp 层映射为 Status/Result，返回值 [[nodiscard]] 且被检查"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    lang: [cpp]
+    source: [core-guidelines, pigweed]
+    ref: [references/cpp/coding.md §5, references/cpp/coding.md §8]
+    verify:
+      method: review
+
+  - id: CPP-015
+    title: "自有代码使用严格告警组并 -Werror；第三方头（ETL、CMSIS、厂商 SDK、RTOS）用 -isystem 引入"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    lang: [cpp]
+    source: [pigweed]
+    ref: references/cpp/coding.md §2
+    verify:
+      method: auto
+      tool: cpp_compiler_flags
+
+  - id: CPP-016
+    title: "编译期配置（波特率、分频、总线能力）用 static_assert/Concept 校验，并有负向编译测试"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [cpp]
+    source: [modm]
+    ref: [references/cpp/patterns.md §5, references/verification/cpp-testing.md §4]
+    verify:
+      method: test
+      tool: negative_compile
+
+  - id: CPP-017
+    title: "不用位域映射寄存器，用掩码与移位常量或类型安全寄存器"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [cpp]
+    source: [core-guidelines, modm]
+    ref: references/cpp/features.md §3
+    verify:
+      method: review
+
+  - id: CPP-018
+    title: "linux-kernel 不引入 C++；Zephyr 只在应用层用 C++，内核、驱动、SYS_INIT 保持 C"
+    level: mandatory
+    profiles: [zephyr, linux-kernel]
+    lang: [cpp]
+    source: [zephyr, linux]
+    ref: references/profiles.md §5
+    verify:
+      method: review
+
+  - id: CPP-019
+    title: "T3 是否使用异常由项目决定，但 RT 线程与 C 边界内不抛异常；RT 线程启动期预分配并 mlockall"
+    level: mandatory
+    profiles: [linux-userspace]
+    lang: [cpp]
+    source: [core-guidelines]
+    ref: [references/cpp/features.md §2, references/cpp/coding.md §7]
+    verify:
+      method: review
+
+  # ---------------------------------------------------------------- ZEP：Zephyr
+  - id: ZEP-001
+    title: "Zephyr code style：Linux 风格、8 宽 tab、行宽 100、所有控制体加花括号"
+    level: mandatory
+    profiles: [zephyr]
+    lang: [c]
+    source: [zephyr]
+    ref: references/platforms/zephyr.md §1
+    verify:
+      method: auto
+      tool: zephyr_compliance
+    conflicts: [CFMT-001]
+
+  - id: ZEP-002
+    title: "只用 /* */ 注释，禁止 //"
+    level: mandatory
+    profiles: [zephyr]
+    lang: [c]
+    source: [zephyr]
+    ref: [references/platforms/zephyr.md §1, references/profiles.md §3]
+    verify:
+      method: auto
+      tool: zephyr_compliance
+
+  - id: ZEP-003
+    title: "硬件来自 devicetree、配置来自 Kconfig；代码不硬编码地址"
+    level: mandatory
+    profiles: [zephyr]
+    lang: [c, cpp]
+    source: [zephyr]
+    ref: references/platforms/zephyr.md §3
+    verify:
+      method: review
+
+  - id: ZEP-004
+    title: "使用设备前检查 device_is_ready()，未就绪返回 -ENODEV"
+    level: mandatory
+    profiles: [zephyr]
+    lang: [c, cpp]
+    source: [zephyr]
+    ref: references/platforms/zephyr.md §3
+    verify:
+      method: review
+
+  - id: ZEP-005
+    title: "函数返回 int：0 成功、负 errno 失败；调用者检查并传播，不自造错误码类型"
+    level: mandatory
+    profiles: [zephyr, linux-kernel]
+    lang: [c]
+    source: [zephyr, linux]
+    ref: [references/platforms/zephyr.md §3, references/profiles.md §3]
+    verify:
+      method: review
+
+  - id: ZEP-006
+    title: "ISR 中只用 ISR 安全 API（k_sem_give、k_msgq_put(..., K_NO_WAIT)、k_work_submit），工作推迟到 k_work 或线程"
+    level: mandatory
+    profiles: [zephyr]
+    lang: [c, cpp]
+    source: [zephyr]
+    ref: references/platforms/zephyr.md §3
+    verify:
+      method: review
+
+  - id: ZEP-007
+    title: "不使用动态内存分配（Coding Guidelines Dir 4.12）；内核对象用 K_*_DEFINE 静态定义"
+    level: mandatory
+    profiles: [zephyr]
+    lang: [c, cpp]
+    source: [zephyr]
+    ref: [references/platforms/zephyr.md §2, references/platforms/zephyr.md §3]
+    verify:
+      method: review
+
+  - id: ZEP-008
+    title: "日志用 LOG_MODULE_REGISTER + LOG_*，不用 printk 做常规日志"
+    level: advisory
+    profiles: [zephyr]
+    lang: [c, cpp]
+    source: [zephyr]
+    ref: references/platforms/zephyr.md §3
+    verify:
+      method: review
+
+  - id: ZEP-009
+    title: "测试用 ztest + testcase.yaml，并用 Twister 运行"
+    level: mandatory
+    profiles: [zephyr]
+    lang: [c, cpp]
+    source: [zephyr]
+    ref: references/platforms/zephyr.md §4
+    verify:
+      method: test
+      tool: twister
+
+  - id: ZEP-010
+    title: "提交标题 area: summary 少于 72 字符、正文非空、AI 辅助加 Assisted-by"
+    level: mandatory
+    profiles: [zephyr]
+    lang: [c, cpp]
+    source: [zephyr]
+    ref: references/platforms/zephyr.md §5
+    verify:
+      method: auto
+      tool: zephyr_compliance
+
+  # ---------------------------------------------------------------- LNXK：Linux 内核
+  - id: LNXK-001
+    title: "内核 coding-style：8 宽 tab、行宽首选 80、K&R 花括号、单语句不加花括号"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §1
+    verify:
+      method: auto
+      tool: checkpatch
+    conflicts: [CFMT-001, CFMT-002, CFMT-004, CFMT-005]
+
+  - id: LNXK-002
+    title: "不 typedef 结构体或指针；不用匈牙利/类型前缀命名"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §1
+    verify:
+      method: auto
+      tool: checkpatch
+    conflicts: [CFMT-003]
+
+  - id: LNXK-003
+    title: "多出口共享清理用 goto，标签按用途命名（out_free_buffer）"
+    level: advisory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §1
+    verify:
+      method: review
+    conflicts: [CFMT-006]
+
+  - id: LNXK-004
+    title: "寄存器访问用 readl/writel 或 regmap；并发共享用锁、原子或 READ_ONCE/WRITE_ONCE"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §1
+    verify:
+      method: auto
+      tool: kernel_build
+      check: sparse
+
+  - id: LNXK-005
+    title: "probe 错误路径用 dev_err_probe() 并正确处理 -EPROBE_DEFER"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §2
+    verify:
+      method: review
+
+  - id: LNXK-006
+    title: "硬中断上下文只确认与唤醒，不睡眠；耗时工作放线程化中断或 workqueue"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §2
+    verify:
+      method: review
+
+  - id: LNXK-007
+    title: "新文件首行 SPDX，代码兼容 GPL-2.0-only"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §2
+    verify:
+      method: auto
+      tool: checkpatch
+
+  - id: LNXK-008
+    title: "新 DT binding 用 schema YAML 并通过 dt_binding_check；compatible 与驱动一致"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §3
+    verify:
+      method: auto
+      tool: dt_binding_check
+
+  - id: LNXK-009
+    title: "make W=1 与 sparse（make C=1）无新增告警"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §4
+    verify:
+      method: auto
+      tool: kernel_build
+
+  - id: LNXK-010
+    title: "不新增 BUG()/BUG_ON()；可恢复情形用 WARN_ON_ONCE()"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §1
+    verify:
+      method: auto
+      tool: checkpatch
+
+  - id: LNXK-011
+    title: "Agent 不自行发送补丁或邮件；提交说明写明未能完成的步骤（未构建、未测试、未复现）"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §5
+    verify:
+      method: review
+
+  # ---------------------------------------------------------------- LNXU：嵌入式 Linux 用户态
+  - id: LNXU-001
+    title: "检查每个系统调用返回值，处理 EINTR 与部分读写"
+    level: mandatory
+    profiles: [linux-userspace]
+    lang: [c, cpp]
+    source: [posix]
+    ref: references/platforms/linux-userspace.md §2
+    verify:
+      method: test
+
+  - id: LNXU-002
+    title: "配置与持久数据原子写：临时文件 → fsync → rename → 目录 fsync"
+    level: mandatory
+    profiles: [linux-userspace]
+    lang: [c, cpp]
+    source: [posix]
+    ref: references/platforms/linux-userspace.md §1
+    verify:
+      method: test
+    cost: "每次保存多两次 fsync，闪存寿命与延迟需评估"
+
+  - id: LNXU-003
+    title: "GPIO 用 libgpiod 字符设备接口，不用已弃用的 sysfs GPIO"
+    level: mandatory
+    profiles: [linux-userspace]
+    lang: [c, cpp]
+    source: [linux]
+    ref: references/platforms/linux-userspace.md §1
+    verify:
+      method: review
+
+  - id: LNXU-004
+    title: "信号处理函数只调用 async-signal-safe 函数，优先 signalfd 或 self-pipe"
+    level: mandatory
+    profiles: [linux-userspace]
+    lang: [c, cpp]
+    source: [posix]
+    ref: references/platforms/linux-userspace.md §2
+    verify:
+      method: review
+
+  - id: LNXU-005
+    title: "以非 root 运行并最小化权限（capabilities、udev 规则）"
+    level: mandatory
+    profiles: [linux-userspace]
+    lang: [c, cpp]
+    source: [linux]
+    ref: references/platforms/linux-userspace.md §2
+    verify:
+      method: review
+
+  - id: LNXU-006
+    title: "需要中断级时延或确定性控制环的功能不放在用户态，交给内核驱动、协处理器或 MCU"
+    level: mandatory
+    profiles: [linux-userspace]
+    lang: [c, cpp]
+    source: [skill]
+    ref: references/platforms/linux-userspace.md §1
+    verify:
+      method: review
+
+  - id: LNXU-007
+    title: "host 单元测试在 ASan/UBSan 下运行；host 结果与目标板结果分开报告"
+    level: mandatory
+    profiles: [linux-userspace]
+    lang: [c, cpp]
+    source: [skill]
+    ref: references/platforms/linux-userspace.md §3
+    verify:
+      method: test
+      tool: sanitizers
+
+  # ---------------------------------------------------------------- TEST：测试与资源证据
+  - id: TEST-001
+    title: "测试基线：MCU 的 C 用 Ceedling、C++ 用 CppUTest；Zephyr 用 ztest；内核用 KUnit/kselftest"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill]
+    ref: references/profiles.md §5
+    except: "项目已有测试框架时沿用项目框架"
+    verify:
+      method: review
+
+  - id: TEST-002
+    title: "新增或修改的公共函数有测试：正常路径、参数错误、依赖错误、边界"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    lang: [c, cpp]
+    source: [skill]
+    ref: [references/verification/ceedling.md §4, references/verification/cpp-testing.md §3]
+    verify:
+      method: test
+      tool: ceedling
+
+  - id: TEST-003
+    title: "C++ 测试接缝优先编译期 Fake，其次链接期替换，最后才是运行期 Mock"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [cpp]
+    source: [pigweed]
+    ref: references/verification/cpp-testing.md §3
+    verify:
+      method: review
+
+  - id: TEST-004
+    title: "目标构建可用时报告 Flash/RAM 余量变化；C++ 改动给出与基线 ELF 的 cpp_cost diff"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [c, cpp]
+    source: [skill, measured]
+    ref: references/verification/cpp-testing.md §6
+    verify:
+      method: measure
+      tool: cpp_cost
+      check: diff
+
+  - id: TEST-005
+    title: "内核改动的 KUnit/kselftest 结果随补丁报告；未能执行的步骤明确说明"
+    level: mandatory
+    profiles: [linux-kernel]
+    lang: [c]
+    source: [linux]
+    ref: references/platforms/linux-kernel.md §4
+    verify:
+      method: test
+      tool: kunit

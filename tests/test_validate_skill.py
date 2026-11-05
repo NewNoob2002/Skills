@@ -249,6 +249,107 @@ class MutationTest(unittest.TestCase):
         self.assertEqual(got["hygiene"], "FAIL")
 
 
+class RulesMutationTest(MutationTest):
+    """standards/rules.yaml 与 profiles/ 的变异测试。"""
+
+    def rules(self):
+        return self.skill / "standards" / "rules.yaml"
+
+    def test_duplicate_rule_id(self):
+        replace(self.rules(), "  - id: ARCH-002\n", "  - id: ARCH-001\n")
+        self.assert_only_fails("rules")
+        self.assertTrue(any("duplicate id" in m for m in self.messages("rules")))
+
+    def test_bad_rule_id_format(self):
+        replace(self.rules(), "  - id: ARCH-002\n", "  - id: arch-2\n")
+        self.assert_only_fails("rules")
+
+    def test_unknown_profile_and_source(self):
+        replace(self.rules(), "    profiles: [mcu-rtos]\n    lang: [c, cpp]\n    source: [rovinax]\n",
+                "    profiles: [mcu-rtoss]\n    lang: [c, cpp]\n    source: [rovinaxx]\n")
+        self.assert_only_fails("rules")
+        msgs = " ".join(self.messages("rules"))
+        self.assertIn("unknown profile 'mcu-rtoss'", msgs)
+        self.assertIn("undeclared source 'rovinaxx'", msgs)
+
+    def test_ref_to_missing_section(self):
+        replace(self.rules(), "    ref: references/architecture/mcu-architecture.md §4\n",
+                "    ref: references/architecture/mcu-architecture.md §42\n")
+        self.assert_only_fails("rules")
+
+    def test_ref_to_missing_file(self):
+        replace(self.rules(), "    ref: references/platforms/linux-kernel.md §3\n",
+                "    ref: references/platforms/linux-kernal.md §3\n")
+        self.assert_only_fails("rules")
+
+    def test_auto_without_tool(self):
+        replace(self.rules(), "      method: auto\n      tool: arch_lint\n      check: cycle\n",
+                "      method: auto\n")
+        self.assert_only_fails("rules")
+
+    def test_unknown_tool_check(self):
+        replace(self.rules(), "      check: cycle\n", "      check: cycles\n")
+        self.assert_only_fails("rules")
+
+    def test_flag_not_in_flag_file(self):
+        replace(self.rules(), '      check: "-Wfloat-equal"\n', '      check: "-Wfloat-equall"\n')
+        self.assert_only_fails("rules")
+
+    def test_asymmetric_conflict(self):
+        replace(self.rules(), "    conflicts: [CFMT-006]\n", "")
+        self.assert_only_fails("rules")
+        self.assertTrue(any("not listed on LNXK-003" in m for m in self.messages("rules")))
+
+    def test_bad_level_and_method(self):
+        replace(self.rules(), "不复制实现的输出\"\n    level: mandatory\n", "不复制实现的输出\"\n    level: must\n")
+        replace(self.rules(), "    ref: references/workflows/workflow.md §5\n    verify:\n      method: review\n",
+                "    ref: references/workflows/workflow.md §5\n    verify:\n      method: eyeball\n")
+        self.assert_only_fails("rules")
+        msgs = " ".join(self.messages("rules"))
+        self.assertIn("GEN-006: level", msgs)
+        self.assertIn("verify.method", msgs)
+
+    def test_duplicate_key_is_not_masked_by_pyyaml(self):
+        # 回归：子集解析器报重复键后曾退回 PyYAML，而 PyYAML 默认后者覆盖，错误被吞掉
+        replace(self.rules(), "  - id: GEN-006\n", "  - id: GEN-006\n    level: must\n")
+        got = self.statuses(expect_exit=1)
+        self.assertEqual(got["rules"], "FAIL")
+        self.assertTrue(any("duplicate key" in m for m in self.messages("rules")))
+        # rules.yaml 无法解析时 profiles 依赖它，应为 BLOCKED 而不是级联 FAIL
+        self.assertEqual(got["profiles"], "BLOCKED")
+
+    def test_duplicate_key_in_yaml_asset(self):
+        append(self.skill / "assets" / "ceedling" / "project.yml", "\n:project:\n  :build_root: x\n")
+        if self.baseline["data-yaml"] == "NOT_RUN":
+            self.skipTest("PyYAML not installed")
+        self.assert_only_fails("data-yaml")
+
+    def test_missing_profile_file(self):
+        (self.skill / "profiles" / "zephyr.yaml").unlink()
+        got = self.statuses(expect_exit=1)
+        self.assertEqual(got["profiles"], "FAIL")
+
+    def test_extra_profile_file(self):
+        text = (self.skill / "profiles" / "zephyr.yaml").read_text(encoding="utf-8")
+        (self.skill / "profiles" / "nuttx.yaml").write_text(text.replace("id: zephyr", "id: nuttx"),
+                                                            encoding="utf-8")
+        got = self.statuses(expect_exit=1)
+        self.assertEqual(got["profiles"], "FAIL")
+
+    def test_profile_gate_unknown_tool(self):
+        replace(self.skill / "profiles" / "zephyr.yaml", "  - tool: twister\n", "  - tool: twisterr\n")
+        self.assert_only_fails("profiles")
+
+    def test_profile_id_mismatch(self):
+        replace(self.skill / "profiles" / "zephyr.yaml", "id: zephyr\n", "id: zephyr-app\n")
+        self.assert_only_fails("profiles")
+
+    def test_rules_file_missing_is_not_run_but_profiles_fail(self):
+        self.rules().unlink()
+        got = self.statuses(expect_exit=1)
+        self.assertEqual(got["rules"], "NOT_RUN")
+        self.assertEqual(got["profiles"], "FAIL")
+
 class YamlSubsetTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -271,9 +372,22 @@ class YamlSubsetTest(unittest.TestCase):
         self.assertEqual(data, {"v": 1.0, "q": "1.0", "s": "it's"})
 
     def test_rejects_unsupported(self):
-        for bad in ("a: [1, 2]\n", "a: &anchor x\n", "a:\n\tb: 1\n", "a: 1\na: 2\n", "key:value\n"):
+        for bad in ("a: {x: 1}\n", "a: &anchor x\n", "a:\n\tb: 1\n", "a: 1\na: 2\n", "key:value\n"):
             with self.subTest(bad=bad), self.assertRaises(self.vs.YamlSubsetError):
                 self.vs.parse_yaml_subset(bad)
+
+    def test_flow_sequences(self):
+        data = self.vs.parse_yaml_subset('a: [x, "y z", \'w\']\nb: []\nc: [1, true]  # note\n')
+        self.assertEqual(data, {"a": ["x", "y z", "w"], "b": [], "c": [1, True]})
+        for bad in ("a: [x, [y]]\n", "a: [x,, y]\n", "a: [x] tail\n", "a: [x\n"):
+            with self.subTest(bad=bad), self.assertRaises(self.vs.YamlSubsetError):
+                self.vs.parse_yaml_subset(bad)
+
+    def test_rules_and_profiles_parse_without_pyyaml(self):
+        # 子集解析器必须独立解析全部规则与 profile 文件（没有 PyYAML 的环境不得静默退化）
+        for path in [SKILL / "standards" / "rules.yaml", *sorted((SKILL / "profiles").glob("*.yaml"))]:
+            with self.subTest(path=path.name):
+                self.assertIsInstance(self.vs.parse_yaml_subset(path.read_text(encoding="utf-8")), dict)
 
     def test_real_frontmatter(self):
         raw, _body, _end = self.vs.split_frontmatter((SKILL / "SKILL.md").read_text(encoding="utf-8"))
