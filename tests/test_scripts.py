@@ -209,5 +209,34 @@ class RulesConsistencyTest(unittest.TestCase):
         # budget/diff 是 check 的 --budget 与 diff 子命令，其余是符号类别
         self.assertEqual(declared - {"budget", "diff"}, set(cost.SYMBOL_CLASSES))
 
+class WorkflowPagesTest(unittest.TestCase):
+    """references/workflows/ 下每个工作流页面都有固定结构，并在 workflow.md §7 目录中登记。"""
+
+    SECTIONS = ("## 概要", "## 步骤", "## 检查点", "## 通过与失败")
+    ROWS = ("| 触发 |", "| 输入 |", "| 前置条件 |", "| 角色 |", "| 产物 |", "| 人工审批 |")
+
+    def pages(self):
+        return sorted(p for p in (SKILL / "references" / "workflows").glob("*.md") if p.name != "workflow.md")
+
+    def test_ten_workflows(self):
+        self.assertEqual(len(self.pages()), 10)
+
+    def test_fixed_structure(self):
+        for page in self.pages():
+            text = page.read_text(encoding="utf-8")
+            with self.subTest(page=page.name):
+                for heading in self.SECTIONS:
+                    self.assertIn("\n" + heading + "\n", text)
+                for row in self.ROWS:
+                    self.assertIn(row, text)
+                self.assertRegex(text, r"\*\*(?:PASS|ACCEPT)")
+                self.assertRegex(text, r"\*\*(?:FAIL|REJECT)")
+
+    def test_catalog_lists_every_page(self):
+        catalog = (SKILL / "references" / "workflows" / "workflow.md").read_text(encoding="utf-8")
+        for page in self.pages():
+            with self.subTest(page=page.name):
+                self.assertIn(f"]({page.name})", catalog)
+
 if __name__ == "__main__":
     unittest.main()

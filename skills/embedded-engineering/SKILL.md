@@ -53,6 +53,21 @@ description: >-
 
 用户只要求“改个 bug”时不要强加完整评审；用户要求“评审架构”时不要直接写代码。
 
+**工作流**（每页含输入、前置条件、步骤、检查点、通过/失败标准与人工审批条件；角色分离规则见 [workflows/workflow.md](references/workflows/workflow.md) §7）：
+
+| 任务 | 工作流 |
+| --- | --- |
+| 新工程/新子系统架构 | [W01](references/workflows/new-architecture.md) |
+| 审查现有工程架构 | [W02](references/workflows/architecture-review.md) |
+| 新模块设计与实现 | [W03](references/workflows/module-implementation.md) |
+| 驱动、协议栈、中间件 | [W04](references/workflows/driver-design.md) |
+| C/C++ 代码审查 | [W05](references/workflows/code-review.md) |
+| 生成测试用例 | [W06](references/workflows/test-generation.md) |
+| 性能与资源分析 | [W07](references/workflows/performance.md) |
+| 回归测试 | [W08](references/workflows/regression.md) |
+| 重构规划 | [W09](references/workflows/refactor-planning.md) |
+| 最终质量验收 | [W10](references/workflows/acceptance.md) |
+
 ## 3. 按需加载 reference（不要全部读）
 
 | 任务 | 读取 |
@@ -61,6 +76,11 @@ description: >-
 | 架构评审、阶段门、交接、报告格式 | [workflows/workflow.md](references/workflows/workflow.md) |
 | MCU 目录分层、依赖方向、接口/驱动设计 | [architecture/mcu-architecture.md](references/architecture/mcu-architecture.md) |
 | ISR、RTOS 任务/优先级/IPC、DMA、看门狗 | [rtos/mcu-isr-rtos.md](references/rtos/mcu-isr-rtos.md) |
+| ThreadX（与 FreeRTOS 的差异） | [rtos/threadx.md](references/rtos/threadx.md) |
+| RISC-V 中断、原子、内存序 | [platforms/riscv.md](references/platforms/riscv.md) |
+| 状态机、协议解析、超时、断言、日志、故障恢复 | [architecture/state-protocol-fault.md](references/architecture/state-protocol-fault.md) |
+| bootloader、镜像校验、OTA、掉电安全 | [architecture/boot-update.md](references/architecture/boot-update.md) |
+| HardFault/trap 分析、调试器、RTT/SWO、map 与栈分析 | [verification/debugging.md](references/verification/debugging.md) |
 | 写/审 C 代码（MCU 与 userspace） | [c/barr-c.md](references/c/barr-c.md) |
 | 写/审 C++ 代码：语言标准、命名、类设计、错误处理、生命周期、并发、C SDK 边界 | [cpp/coding.md](references/cpp/coding.md) |
 | 某个 C++ 特性能不能用、资源等级、实测开销 | [cpp/features.md](references/cpp/features.md) |
@@ -85,6 +105,7 @@ description: >-
 - `scripts/cpp_cost.py check <elf> --tier T0|T1|T2|T3 [--budget budget.json]`：检查链接产物中按等级禁止的运行时（异常、RTTI、堆、atexit、guard、printf、iostream、原子库调用）与段预算；`cpp_cost.py diff <base.elf> <new.elf>`：A/B 尺寸增量。
 - `scripts/bench/run.sh --cpu <cpu> [--etl <etl>/include]`：在项目工具链上复现 C++ 特性开销表。
 - Zephyr：`./scripts/ci/check_compliance.py -c <range>`、`west twister -T <dir>`。
+- CI 模板：`assets/ci/github-actions.yml`、`assets/ci/gitlab-ci.yml`（只含构建、静态检查与 host 测试，不含硬件动作）。
 - Linux：`./scripts/checkpatch.pl --strict`、`make W=1`、`make C=1`（sparse）、`./tools/testing/kunit/kunit.py run`、`make dt_binding_check`。
 
 ## 5. 输出约定

@@ -19,6 +19,15 @@
 | Zephyr C++ | <https://docs.zephyrproject.org/latest/develop/languages/cpp/index.html>、`lib/cpp/Kconfig` | C++ Kconfig、minimal libc++ 限制 | Apache-2.0 文档 |
 | MISRA C++:2023 | MathWorks/QA Systems 公开资料 | 面向 C++17，取代 MISRA C++:2008 与 AUTOSAR C++14 | — |
 
+| Cortex-M fault 分析 | ARMv7-M Architecture Reference Manual（ARM DDI 0403）、ARMv8-M Architecture Reference Manual（ARM DDI 0553） | CFSR/HFSR/MMFAR/BFAR 地址与位、异常栈帧、EXC_RETURN（[verification/debugging.md](verification/debugging.md) §2） | ARM 文档 |
+| RISC-V | RISC-V Unprivileged / Privileged Specification（<https://riscv.org/specifications/>） | mcause 异常码、A 扩展、RVWMO、psABI 栈对齐（[platforms/riscv.md](platforms/riscv.md)） | CC-BY-4.0 |
+| ThreadX | Eclipse ThreadX（<https://github.com/eclipse-threadx/threadx>）用户手册与 `tx_api.h` | 优先级语义、抢占阈值、ISR 服务调用、内存池（[rtos/threadx.md](rtos/threadx.md)） | MIT |
+| 启动与升级 | MCUboot 设计文档（<https://docs.mcuboot.com/>） | 交换模式、镜像确认与回滚、防回滚计数器（[architecture/boot-update.md](architecture/boot-update.md)） | Apache-2.0 |
+| Agent Skills 规范 | <https://agentskills.io/specification>（核实于 2026-11-05） | frontmatter 约束、目录结构、引用深度；由 `tools/validate_skill.py` 机械检查 | — |
+| Codex 技能元数据 | <https://learn.chatgpt.com/docs/build-skills>（核实于 2026-11-05） | `agents/openai.yaml` 字段与技能发现目录 | — |
+
+**核实状态**：上表最后两行在 2026-11-05 对照原文核实。Cortex-M 一行中的 CFSR/HFSR/MMFAR/BFAR 地址、CFSR 各位位号、HFSR `FORCED`/`VECTTBL`、ACTLR `DISDEFWBUF` 于 2026-11-05 与 ARM CMSIS 头文件 `core_cm4.h`（CMSIS 4）和 `core_cm33.h`（CMSIS 5）逐项核对一致；异常栈帧与 EXC_RETURN 位语义未核对。RISC-V、ThreadX、MCUboot 三行依据上述文档编写，但没有在本次会话中逐条对照原文；寄存器地址、位号、异常码、API 名称在用于具体芯片之前，必须对照该芯片的参考手册和所用版本的文档（`GEN-002`）。
+
 ## 已知需要随上游复核的点
 
 - Zephyr 的 `Assisted-by:` 格式与 coding guidelines 规则表（随版本变化）。
@@ -27,3 +36,5 @@
 - C++ 开销表随工具链变化：新工具链落地时运行 `scripts/bench/run.sh` 并更新 `cpp/features.md` §4。
 - CppUTest 新发布版（v4.0 之后）的 CMake 目标名与 CMake 版本要求。
 - BARR-C:2026 版发布后（官方 kit 计划提供 `2026/` 目录与机器可读规则清单），替换本技能的 2018 基线。
+- P3 新增的 riscv、threadx、boot-update 参考，以及 debugging 中的栈帧/EXC_RETURN 描述，尚未逐条对照原文核实（见上表“核实状态”）。
+- computerguided/embedded-software-development-guidelines 尚未研究（原计划列入 P2，未完成）。

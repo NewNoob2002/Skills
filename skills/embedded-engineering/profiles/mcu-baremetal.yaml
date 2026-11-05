@@ -14,6 +14,10 @@ references:
   - references/cpp/features.md
   - references/verification/ceedling.md
   - references/verification/cpp-testing.md
+  - references/architecture/state-protocol-fault.md
+  - references/architecture/boot-update.md
+  - references/platforms/riscv.md
+  - references/verification/debugging.md
 tests:
   c: "Ceedling（Unity + CMock）"
   cpp: "CppUTest（CppUMock）"

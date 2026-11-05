@@ -1,0 +1,60 @@
+# 固件仓库 CI 模板（GitHub Actions）。复制到目标仓库的 .github/workflows/firmware.yml 后按项目修改。
+#
+# 前提：本技能以 git submodule 或 vendored 副本放在目标仓库的 tools/embedded-engineering/ 下；
+#       CI 不能引用开发机上的技能安装目录。
+# 尖括号占位符（<...>）必须替换；不适用的 job 直接删除，不要留着让它“跳过”。
+# 本模板只做构建、静态检查与 host 测试；flash、HIL 等硬件动作不放进 CI（GEN-001）。
+name: firmware
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  SKILL_DIR: tools/embedded-engineering
+  CEEDLING_VERSION: "1.2.2"   # 本技能核实的基线版本；改为项目锁定的版本（references/verification/ceedling.md）
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y clang-format clang-tidy
+      - name: Layering (ARCH-001..006)
+        run: python3 "$SKILL_DIR/scripts/arch_lint.py" .
+      - name: BARR-C gate on C production code (C-*, CFMT-*)
+        run: sh "$SKILL_DIR/scripts/barrc/check.sh" $(git ls-files 'app/*.[ch]' 'module/*.[ch]' 'interface/*.[ch]' 'driver/*.[ch]' 'bsp/*.[ch]')
+      - name: clang-format for C++ (assets/cpp/.clang-format)
+        run: git ls-files '*.cpp' '*.hpp' | xargs --no-run-if-empty clang-format --style=file:"$SKILL_DIR/assets/cpp/.clang-format" --dry-run --Werror
+
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ceedling
+        run: sudo gem install ceedling -v "$CEEDLING_VERSION"
+      - name: C unit tests (Ceedling, TEST-001/TEST-002)
+        run: ceedling test:all
+      - name: C++ unit tests (CppUTest via CMake)
+        run: cmake -S <tests/cpp> -B build-host && cmake --build build-host && ctest --test-dir build-host --output-on-failure
+
+  target-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi cmake ninja-build
+      - name: Build
+        run: cmake --preset <target-preset> && cmake --build --preset <target-preset>
+      - name: Forbidden runtime and size budget (CPP-001..009, TEST-004)
+        run: python3 "$SKILL_DIR/scripts/cpp_cost.py" check <build/app.elf> --tier <T1> --budget <budget.json>
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            <build/app.elf>
+            <build/app.map>

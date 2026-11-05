@@ -41,18 +41,18 @@ C++ 部分不简单禁止现代特性，而是按资源等级（T0 极小 MCU �
 ```text
 skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此目录）
 ├── SKILL.md                    # 入口：护栏、profile、角色、路由
-├── standards/rules.yaml        # 109 条带 ID 的规则：适用 profile、等级、验证方法、出处章节、冲突
+├── standards/rules.yaml        # 121 条带 ID 的规则：适用 profile、等级、验证方法、出处章节、冲突
 ├── profiles/*.yaml            # 每个 profile 的规范、测试基线、门禁命令（与 rules.yaml 声明一一对应）
 ├── references/                 # 按需读取的规则
 │   ├── profiles.md             #   profile 判定与冲突裁决
 │   ├── sources.md              #   来源、版本、许可
-│   ├── workflows/              #   Architect → Developer → QA、阶段门
-│   ├── architecture/           #   MCU 分层、依赖方向、接口/驱动设计
+│   ├── workflows/              #   角色与阶段门 + W01–W10 十个工作流（输入/步骤/检查点/通过标准/审批）
+│   ├── architecture/           #   MCU 分层、接口/驱动设计、状态机/协议/故障、启动与升级
 │   ├── c/                      #   BARR-C 规则
 │   ├── cpp/                    #   C++ 编码、特性取舍（T0–T3）、模式
-│   ├── rtos/                   #   ISR、RTOS、DMA、看门狗
-│   ├── platforms/              #   Zephyr、Linux kernel、Linux userspace
-│   └── verification/           #   Ceedling、CppUTest、审查清单
+│   ├── rtos/                   #   ISR、RTOS、DMA、看门狗、ThreadX
+│   ├── platforms/              #   Zephyr、Linux kernel、Linux userspace、RISC-V
+│   └── verification/           #   Ceedling、CppUTest、审查清单、调试与故障分析
 ├── scripts/
 │   ├── detect_profile.py       # profile 识别（只读，JSON）
 │   ├── arch_lint.py            # 分层依赖/HAL/寄存器访问检查（C 与 C++）
@@ -65,6 +65,7 @@ skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此�
 │   ├── barr-c/                 # .clang-format / .clang-tidy / .editorconfig / 编译告警
 │   ├── ceedling/project.yml    # Ceedling 1.x 模板
 │   ├── templates/              # 符合 BARR-C 的 C interface/module/test 示例
+│   ├── ci/                     # GitHub Actions / GitLab CI 模板（构建、静态检查、host 测试）
 │   └── cpp/                    # C++：.clang-format/.clang-tidy、编译选项、linker_discard.ld、
 │       └── templates/          #   驱动/总线/RAII/ISR 队列/DMA/组合根/CppUTest 模板
 ├── agents/openai.yaml          # Codex 显示元数据
@@ -109,7 +110,7 @@ install.sh                      # 安装器
 | 项 | 结果 |
 | --- | --- |
 | `python3 tools/validate_skill.py`（技能 13 项 + README 3 项检查） | PASS |
-| `python3 -m unittest discover -s tests -v`（164 个用例，含审查发现回归用例、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试；见下行环境变量；未设置时 C++ 工具链相关用例跳过） | PASS |
+| `python3 -m unittest discover -s tests -v`（168 个用例，含审查发现回归用例、工作流页面结构、规则库与 `arch_lint`/`cpp_cost`/`detect_profile` 实现的一致性测试；见下行环境变量；未设置时 C++ 工具链相关用例跳过） | PASS |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |
 | C++ 模板 clang-format（`assets/cpp/.clang-format`）与 clang-tidy（`assets/cpp/.clang-tidy`，含头文件） | PASS |
@@ -123,6 +124,8 @@ install.sh                      # 安装器
 | 模板 gcc 16 / clang 编译，使用 BARR-C 全部告警门禁并加 `-Werror` | PASS |
 | `test_ledctl.c` 链接真实 Unity，开启 ASan/UBSan 运行（5 个用例） | PASS |
 | `install.sh`：项目安装、拒绝重复安装、`--overwrite`、`--dry-run` | PASS |
+| `assets/ci/*.yml` CI 模板 | 仅做 YAML 解析检查（`data-yaml` PASS）；NOT_RUN：未在 GitHub/GitLab 上实际运行，本机没有 actionlint |
+| P3 新增参考的事实核对 | Cortex-M fault 寄存器地址与位号已对照 CMSIS 头文件核实；RISC-V、ThreadX、MCUboot 内容 NOT_RUN（未对照原文，见 `references/sources.md`） |
 | `scripts/barrc/check.sh` 整体执行 | NOT_RUN：本环境自动审批不允许执行下载的脚本；其中的 clang-format/clang-tidy/词法检查已分别手动执行 |
 | `ceedling test:all` 使用 `assets/ceedling/project.yml` | NOT_RUN：本机没有 Ruby/Ceedling；YAML 键已对照 Ceedling 1.x 文档核对 |
 | Zephyr（`west twister`、`check_compliance.py`）、Linux（checkpatch、KUnit） | NOT_RUN：只是文档规则，本仓库没有对应源码树 |

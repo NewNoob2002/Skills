@@ -87,3 +87,27 @@ hardware_gap: <没有硬件时哪些证据缺失>
 - 注册表/构建接线或 `NOT_RUN` 桩不能证明功能可用。
 - 有界修正失败后：保存已完成/剩余清单并报告阻塞，不要静默开始同样的重试。
 - 缺硬件是显式的“台架缺口”，不是无限循环做软件评审的理由。
+
+## 7. 工作流目录与角色分离
+
+| # | 工作流 | 文件 | 主导角色 | 独立验证者 |
+| --- | --- | --- | --- | --- |
+| W01 | 新工程架构设计 | [new-architecture.md](new-architecture.md) | Architect | QA 定义每个模块的证据；用户批准 |
+| W02 | 现有工程架构审查 | [architecture-review.md](architecture-review.md) | Architect | QA 复核机械检查 |
+| W03 | 新模块设计与实现 | [module-implementation.md](module-implementation.md) | Developer | QA（测试先于实现冻结） |
+| W04 | 驱动与中间件设计 | [driver-design.md](driver-design.md) | Architect → Developer | QA（mock 总线测试 + HIL 计划） |
+| W05 | C/C++ 代码审查 | [code-review.md](code-review.md) | Reviewer（QA） | 不是作者本人 |
+| W06 | 测试用例生成 | [test-generation.md](test-generation.md) | QA | 变异检查证明用例能失败 |
+| W07 | 性能与资源分析 | [performance.md](performance.md) | Developer | QA 复核方法 |
+| W08 | 回归测试 | [regression.md](regression.md) | QA | 与基线比较 |
+| W09 | 重构规划 | [refactor-planning.md](refactor-planning.md) | Architect | QA 维护行为基线 |
+| W10 | 最终工程质量验收 | [acceptance.md](acceptance.md) | QA（独立） | 人工最终签字 |
+
+每页的固定结构：概要（触发、输入、前置条件、角色、产物、人工审批）→ 步骤 → 检查点 → 通过与失败。
+
+**角色分离规则**（任务要求：架构与测试不得仅由代码作者自行验收）：
+
+- 架构结论由 Architect 给出，并经用户批准；Developer 不得为了实现方便而修改已批准的接口，需要修改时回到架构门。
+- 验收测试由 QA 在实现之前或独立于实现编写，期望值来自规格（`GEN-006`）。
+- 同一个 Agent 会话中，实现与验收必须是不同的角色步骤，并至少满足以下一条：(a) 验收由另一个 Agent、会话或人员执行；(b) 验收所用的测试在实现之前已提交（task contract 的 `frozen_inputs`）。两条都不满足时，验收结论为 `BLOCKED`（缺少独立验证），不能报告为 PASS。
+- 最终验收（W10）的签字只能由人完成。

@@ -483,6 +483,11 @@ class RulesMutationTest(MutationTest):
         replace(self.skill / "profiles" / "zephyr.yaml", "id: zephyr\n", "id: zephyr-app\n")
         self.assert_only_fails("profiles")
 
+    def test_cited_unknown_rule_id(self):
+        append(self.skill / "references" / "profiles.md", "\n违反 `ISR-099` 时……\n")
+        self.assert_only_fails("rules")
+        self.assertTrue(any("ISR-099" in m for m in self.messages("rules")))
+
     def test_rules_file_missing_is_not_run_but_profiles_fail(self):
         self.rules().unlink()
         got = self.statuses(expect_exit=1)

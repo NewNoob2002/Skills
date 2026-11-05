@@ -10,6 +10,7 @@ references:
   - references/platforms/linux-userspace.md
   - references/c/barr-c.md
   - references/cpp/coding.md
+  - references/architecture/state-protocol-fault.md
 tests:
   c: "项目既有框架；没有时用 Ceedling/Unity 或 cmocka"
   cpp: "项目既有框架；没有时用 CppUTest"

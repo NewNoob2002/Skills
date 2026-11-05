@@ -1,0 +1,37 @@
+# 固件仓库 CI 模板（GitLab CI）。复制到目标仓库的 .gitlab-ci.yml 后按项目修改。
+#
+# 前提：本技能以 git submodule 或 vendored 副本放在 tools/embedded-engineering/ 下。
+# 尖括号占位符（<...>）必须替换；镜像应改为项目锁定版本的内部镜像。
+# 本模板只做构建、静态检查与 host 测试；flash、HIL 等硬件动作不放进 CI（GEN-001）。
+stages: [static, test, build]
+
+variables:
+  SKILL_DIR: tools/embedded-engineering
+  GIT_SUBMODULE_STRATEGY: recursive
+  CEEDLING_VERSION: "1.2.2"   # 本技能核实的基线版本；改为项目锁定的版本（references/verification/ceedling.md）
+
+static:
+  stage: static
+  image: <registry>/firmware-tools:<tag>   # 需包含 python3、clang-format、clang-tidy
+  script:
+    - python3 "$SKILL_DIR/scripts/arch_lint.py" .
+    - sh "$SKILL_DIR/scripts/barrc/check.sh" $(git ls-files 'app/*.[ch]' 'module/*.[ch]' 'interface/*.[ch]' 'driver/*.[ch]' 'bsp/*.[ch]')
+
+host-tests:
+  stage: test
+  image: <registry>/firmware-tools:<tag>   # 需包含 ruby、cmake 与 CppUTest
+  script:
+    - gem install ceedling -v "$CEEDLING_VERSION"
+    - ceedling test:all
+    - cmake -S <tests/cpp> -B build-host && cmake --build build-host && ctest --test-dir build-host --output-on-failure
+
+target-build:
+  stage: build
+  image: <registry>/arm-gcc:<version>
+  script:
+    - cmake --preset <target-preset> && cmake --build --preset <target-preset>
+    - python3 "$SKILL_DIR/scripts/cpp_cost.py" check <build/app.elf> --tier <T1> --budget <budget.json>
+  artifacts:
+    paths:
+      - <build/app.elf>
+      - <build/app.map>

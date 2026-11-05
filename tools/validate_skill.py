@@ -20,7 +20,8 @@ BLOCKED（依赖的检查失败而无法执行）。NOT_RUN 与 BLOCKED 都不�
   data-json    *.json 可解析
   data-yaml    *.yml/*.yaml/.clang-format/.clang-tidy 可解析（需要 PyYAML，否则 NOT_RUN）
   openai-yaml  agents/openai.yaml 字段、图标路径、颜色格式
-  rules        standards/rules.yaml 结构、ID 唯一、profile/来源/工具已声明、ref 章节存在、冲突双向登记
+  rules        standards/rules.yaml 结构、ID 唯一、profile/来源/工具已声明、ref 章节存在、冲突双向登记；
+               文档中以反引号引用的 Rule ID 必须存在
   profiles     profiles/<id>.yaml 与 rules.yaml 声明的 profile 一一对应，引用与门禁工具存在
   hygiene      无 __pycache__/*.pyc/build 目录/编辑器残留、无超大文件、无指向技能外的符号链接
 """
@@ -951,8 +952,21 @@ def load_rules(skill: Path) -> tuple[dict | None, str | None, str | None]:
         return None, f"cannot parse: {exc}", None
 
 
+CITED_RULE_RE = re.compile(r"`([A-Z]{1,5}-\d{3})`")
+
+
+def check_cited_rules(docs: dict[Path, str], skill: Path, known: set[str], check: Check) -> None:
+    """文档中以反引号引用的 Rule ID（如 `ISR-002`）必须存在于 rules.yaml。"""
+    for md, text in docs.items():
+        rel = str(md.relative_to(skill))
+        for no, line in prose_lines(text):
+            for m in CITED_RULE_RE.finditer(line):
+                if m.group(1) not in known:
+                    check.error(rel, no, f"cites unknown rule {m.group(1)}")
+
+
 def check_rules(skill: Path, data: dict | None, parse_error: str | None, not_run: str | None,
-                check: Check) -> None:
+                check: Check, docs: dict[Path, str] | None = None) -> None:
     rel = str(RULES_FILE)
     if not_run:
         check.not_run = not_run
@@ -1083,6 +1097,8 @@ def check_rules(skill: Path, data: dict | None, parse_error: str | None, not_run
         if "conflicts" in rule and not _str_list(rule["conflicts"]):
             check.error(rel, None, f"{where}: conflicts must be a non-empty list of rule ids")
 
+    if docs is not None:
+        check_cited_rules(docs, skill, set(seen), check)
     for rid, rule in seen.items():
         for other in rule.get("conflicts") or []:
             if not isinstance(other, str):
@@ -1211,11 +1227,13 @@ def validate_skill(skill: Path, cfg: dict) -> dict:
     entry_links: set[Path] = set()
     cache: dict[Path, set[int]] = {}
     texts: list[str] = []
+    docs: dict[Path, str] = {}
     for md in skill_markdown(skill):
         text = read_text_or_none(md)
         if text is None:
             continue  # hygiene 已报告
         texts.append(text)
+        docs[md] = text
         check_links(md, text, ctx, checks["links"], entry_links if md == skill / "SKILL.md" else None)
         check_paths(md, text, ctx, checks["paths"])
         check_sections(md, text, ctx, checks["sections"], cache)
@@ -1229,7 +1247,7 @@ def validate_skill(skill: Path, cfg: dict) -> dict:
     check_yaml_assets(skill, checks["data-yaml"])
     check_openai_yaml(skill, checks["openai-yaml"])
     rules, rules_error, rules_not_run = load_rules(skill)
-    check_rules(skill, rules, rules_error, rules_not_run, checks["rules"])
+    check_rules(skill, rules, rules_error, rules_not_run, checks["rules"], docs)
     check_profiles(skill, rules, rules_error, rules_not_run, checks["profiles"])
     name = meta.get("name") if isinstance(meta, dict) else None
     return {"kind": "skill", "name": name or skill.name, "path": str(skill),

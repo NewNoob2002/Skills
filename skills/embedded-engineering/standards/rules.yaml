@@ -37,6 +37,10 @@ sources:
   etl: "ETL 固定容量容器与 ISR 队列"
   measured: "本技能在 Cortex-M0+/M4 上实测的开销数据（references/cpp/features.md §4）"
   posix: "POSIX / Linux man-pages（系统调用语义、async-signal-safe）"
+  arm: "ARMv7-M / ARMv8-M Architecture Reference Manual（ARM DDI 0403 / DDI 0553）"
+  riscv: "RISC-V Unprivileged / Privileged Specification"
+  threadx: "Eclipse ThreadX 用户手册与 tx_api.h"
+  mcuboot: "MCUboot 官方设计文档"
 
 verify_tools:
   arch_lint:
@@ -1276,3 +1280,135 @@ rules:
     verify:
       method: test
       tool: kunit
+
+  # ---------------------------------------------------------------- FSM / PROTO / ERR / FAULT：状态机、协议、错误与故障
+  - id: FSM-001
+    title: "状态机在每个状态下显式处理意外事件并进入定义的错误处理，不静默丢弃、不落入未定义状态"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill]
+    ref: references/architecture/state-protocol-fault.md §1
+    verify:
+      method: test
+
+  - id: PROTO-001
+    title: "帧解析先校验长度字段不超过最大帧长与剩余缓冲区再访问缓冲区；校验通过前不执行命令"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill]
+    ref: references/architecture/state-protocol-fault.md §2
+    verify:
+      method: test
+
+  - id: PROTO-002
+    title: "多字节字段显式转换字节序；不把结构体指针覆盖到可能未对齐的接收缓冲区上"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill, barr-c]
+    ref: references/architecture/state-protocol-fault.md §2
+    verify:
+      method: review
+
+  - id: ERR-001
+    title: "断言只用于程序员错误；外部输入、硬件错误与超时返回错误码；发布构建中断言失败进入安全态而不是继续运行"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    lang: [c, cpp]
+    source: [skill, core-guidelines]
+    ref: references/architecture/state-protocol-fault.md §4
+    verify:
+      method: review
+
+  - id: FAULT-001
+    title: "启动时记录复位原因；fault handler 与断言失败把现场写入 no-init RAM 或预留 Flash，并在下次启动时上报"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [c, cpp]
+    source: [skill, arm]
+    ref: [references/architecture/state-protocol-fault.md §6, references/verification/debugging.md §5]
+    verify:
+      method: review
+
+  - id: DBG-001
+    title: "调试器的 halt、reset、flash 与 option bytes 操作属于硬件动作：halt 正在控制执行器的目标同样需要授权"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [c, cpp]
+    source: [skill]
+    ref: [references/verification/debugging.md §1, SKILL.md §0]
+    verify:
+      method: review
+
+  # ---------------------------------------------------------------- BOOT：启动链与升级
+  - id: BOOT-001
+    title: "每次启动在跳转前校验镜像哈希（量产设备校验签名）；校验失败不跳转"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [c, cpp]
+    source: [mcuboot]
+    ref: references/architecture/boot-update.md §2
+    when: "工程包含 bootloader 或现场升级功能"
+    verify:
+      method: test
+
+  - id: BOOT-002
+    title: "升级过程中任意时刻掉电都可恢复；新镜像经自检确认，未确认即复位时回滚"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [c, cpp]
+    source: [mcuboot]
+    ref: references/architecture/boot-update.md §3
+    when: "工程包含现场升级功能"
+    verify:
+      method: test
+    cost: "双槽方案需要第二个镜像槽与交换区的 Flash 空间"
+
+  - id: BOOT-003
+    title: "防回滚：镜像携带单调安全计数器，bootloader 拒绝低于已记录值的镜像"
+    level: advisory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    lang: [c, cpp]
+    source: [mcuboot]
+    ref: references/architecture/boot-update.md §2
+    when: "产品有安全要求或签名启动"
+    verify:
+      method: test
+
+  # ---------------------------------------------------------------- RV / TX：RISC-V 与 ThreadX
+  - id: RV-001
+    title: "RISC-V 目标不含 A 扩展时原子读-改-写改用临界区；MMIO 与 DMA 描述符的访问顺序用 fence 保证"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos]
+    lang: [c, cpp]
+    source: [riscv]
+    ref: references/platforms/riscv.md §3
+    when: "目标为 RISC-V"
+    verify:
+      method: auto
+      tool: cpp_cost
+      check: atomic_libcall
+
+  - id: TX-001
+    title: "ThreadX 的 ISR 中只调用允许在中断中使用的服务，等待选项为 TX_NO_WAIT"
+    level: mandatory
+    profiles: [mcu-rtos]
+    lang: [c, cpp]
+    source: [threadx]
+    ref: references/rtos/threadx.md §2
+    when: "RTOS 为 ThreadX"
+    verify:
+      method: review
+
+  - id: TX-002
+    title: "ThreadX 优先级数值越小优先级越高（与 FreeRTOS 相反），移植时逐个核对优先级与抢占阈值"
+    level: mandatory
+    profiles: [mcu-rtos]
+    lang: [c, cpp]
+    source: [threadx]
+    ref: references/rtos/threadx.md §1
+    when: "RTOS 为 ThreadX，或在 FreeRTOS 与 ThreadX 之间移植"
+    verify:
+      method: review
