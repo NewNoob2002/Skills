@@ -53,6 +53,37 @@ class ParseTest(unittest.TestCase):
             "not json", {"type": "result", "result": "ok"})
         self.assertFalse(ra.parse_claude(out)["skill_used"])
 
+    def test_claude_records_effective_model(self):
+        out = jsonl({"type": "system", "subtype": "init", "model": "claude-opus-5-5"},
+                    {"type": "result", "result": "ok"})
+        self.assertEqual(ra.parse_claude(out)["model"], "claude-opus-5-5")
+        self.assertIsNone(ra.parse_claude(jsonl({"type": "result", "result": "ok"}))["model"])
+
+    def test_claude_runner_pins_requested_model(self):
+        proc = SimpleNamespace(stdout="", stderr="", returncode=0)
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(ra.subprocess, "run", return_value=proc) as run:
+            raw = Path(tmp) / "x.jsonl"
+            ra.run_claude("p", Path(tmp), raw, 5, model="claude-opus-5-5")
+            cmd = run.call_args.args[0]
+            self.assertEqual(cmd[cmd.index("--model") + 1], "claude-opus-5-5")
+            ra.run_claude("p", Path(tmp), raw, 5)
+            self.assertNotIn("--model", run.call_args.args[0])
+
+    def test_codex_runner_pins_model_and_effort(self):
+        proc = SimpleNamespace(stdout="", stderr="", returncode=0)
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(ra.subprocess, "run", return_value=proc) as run:
+            raw = Path(tmp) / "x.jsonl"
+            result = ra.run_codex("p", Path(tmp), raw, 5, model="codex/gpt-6.1-sol", effort="low")
+            cmd = run.call_args.args[0]
+            self.assertEqual(cmd[cmd.index("-m") + 1], "codex/gpt-6.1-sol")
+            self.assertEqual(cmd[cmd.index("-c") + 1], 'model_reasoning_effort="low"')
+            self.assertEqual(cmd[-1], "p")  # 提示词必须在所有选项之后
+            self.assertEqual(result["model_requested"], "codex/gpt-6.1-sol effort=low")
+            ra.run_codex("p", Path(tmp), raw, 5)
+            self.assertNotIn("-m", run.call_args.args[0])
+
     def test_codex_skill_read_and_last_message(self):
         out = jsonl(
             {"type": "item.completed", "item": {"type": "command_execution",

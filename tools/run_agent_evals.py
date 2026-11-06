@@ -43,6 +43,13 @@ CASES = REPO / "evals" / "agent" / "cases.yaml"
 RUNS = REPO / "evals" / "agent" / "runs"
 SKILL_NAME = "embedded-engineering"
 DEFAULT_JUDGE = "magpie/antigravity/gemini-4-argon"
+# 显式固定被测模型：--setting-sources project 不读取用户设置，未指定时 CLI 会回落到自身默认模型，
+# 与历史基线（claude-opus-5-5）不一致，结果不可比
+DEFAULT_CLAUDE_MODEL = "claude-opus-5-5"
+# Codex 同理：未指定时使用 ~/.codex/config.toml 的当时配置，该文件会被其他会话改写（2026-11-06 曾变为 DeepSeek）。
+# 默认值取自 2026-11-05 定向复测的会话日志（codex/gpt-6.1-sol，reasoning_effort=low）
+DEFAULT_CODEX_MODEL = "codex/gpt-6.1-sol"
+DEFAULT_CODEX_EFFORT = "low"
 PASS, FAIL, NOT_RUN, BLOCKED = "PASS", "FAIL", "NOT_RUN", "BLOCKED"
 CLAUDE_DENIED = "Bash Edit Write NotebookEdit WebFetch WebSearch"
 CASE_KEYS = {"id", "category", "prompt", "setup", "expect_skill", "contains_all", "not_contains", "rubric"}
@@ -89,9 +96,11 @@ def make_sandbox(agent: str, sandbox_project: str, root: Path, setup: str | None
 
 # --------------------------------------------------------------------------- Agent 运行与解析
 
-def run_claude(prompt: str, repo: Path, raw: Path, timeout: int) -> dict:
+def run_claude(prompt: str, repo: Path, raw: Path, timeout: int, model: str | None = None) -> dict:
     cmd = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose", "--setting-sources", "project",
            "--strict-mcp-config", "--no-session-persistence", "--disallowedTools", CLAUDE_DENIED]
+    if model:
+        cmd += ["--model", model]
     proc = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                           timeout=timeout, check=False)
     raw.write_text(proc.stdout, encoding="utf-8")
@@ -101,7 +110,7 @@ def run_claude(prompt: str, repo: Path, raw: Path, timeout: int) -> dict:
 
 def parse_claude(stdout: str) -> dict:
     """解析 claude -p --output-format stream-json 的事件流。"""
-    tools, final, cost, skill = [], "", None, False
+    tools, final, cost, skill, model = [], "", None, False, None
     for line in stdout.splitlines():
         try:
             ev = json.loads(line)
@@ -109,7 +118,9 @@ def parse_claude(stdout: str) -> dict:
             continue
         if not isinstance(ev, dict):
             continue  # 合法 JSON 但不是事件对象（例如日志字符串）
-        if ev.get("type") == "assistant":
+        if ev.get("type") == "system" and ev.get("subtype") == "init":
+            model = ev.get("model")  # 实际生效的模型，用于核对是否与请求一致
+        elif ev.get("type") == "assistant":
             for c in ev.get("message", {}).get("content", []):
                 if c.get("type") == "tool_use":
                     blob = json.dumps(c.get("input", {}), ensure_ascii=False)
@@ -120,16 +131,23 @@ def parse_claude(stdout: str) -> dict:
         elif ev.get("type") == "result":
             final = ev.get("result") or ""
             cost = ev.get("total_cost_usd")
-    return {"final": final, "skill_used": skill, "tools": tools, "cost_usd": cost}
+    return {"final": final, "skill_used": skill, "tools": tools, "cost_usd": cost, "model": model}
 
 
-def run_codex(prompt: str, repo: Path, raw: Path, timeout: int) -> dict:
+def run_codex(prompt: str, repo: Path, raw: Path, timeout: int, model: str | None = None,
+              effort: str | None = None) -> dict:
     cmd = ["codex", "exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
-           "-C", str(repo), prompt]
-    proc = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+           "-C", str(repo)]
+    if model:
+        cmd += ["-m", model]
+    if effort:
+        cmd += ["-c", f'model_reasoning_effort="{effort}"']
+    proc = subprocess.run(cmd + [prompt], cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                           timeout=timeout, check=False)
     raw.write_text(proc.stdout, encoding="utf-8")
-    return {"exit_code": proc.returncode, **parse_codex(proc.stdout),
+    # codex exec --json 不输出实际模型，只能记录请求值
+    requested = " ".join(x for x in (model, effort and f"effort={effort}") if x) or None
+    return {"exit_code": proc.returncode, **parse_codex(proc.stdout), "model_requested": requested,
             "stderr_tail": proc.stderr.strip().splitlines()[-5:]}
 
 
@@ -262,7 +280,12 @@ def evaluate(agent: str, case: dict, repo: Path, outdir: Path, args, rep: int = 
     raw.parent.mkdir(parents=True, exist_ok=True)
     start = time.monotonic()
     try:
-        run = RUNNERS[agent](case["prompt"], repo, raw, args.timeout)
+        if agent == "claude":
+            extra = {"model": getattr(args, "claude_model", None) or None}
+        else:
+            extra = {"model": getattr(args, "codex_model", None) or None,
+                     "effort": getattr(args, "codex_effort", None) or None}
+        run = RUNNERS[agent](case["prompt"], repo, raw, args.timeout, **{k: v for k, v in extra.items() if v})
     except subprocess.TimeoutExpired:
         return {"agent": agent, "id": case["id"], "category": case["category"], "rep": rep, "status": BLOCKED,
                 "reason": f"agent timeout after {args.timeout} s"}
@@ -347,7 +370,12 @@ def render(report: dict, cases: list[dict]) -> str:
         false_rate = f"{agg['false_triggers']}/{agg['should_not']}" if agg["should_not"] else "—"
         total = sum(s.values())
         lo, hi = wilson(s[PASS], total)
-        lines += [f"## {agent}", "",
+        runs = [r.get("run") or {} for r in report["records"] if r["agent"] == agent]
+        models = sorted({x["model"] for x in runs if x.get("model")})
+        requested = sorted({x["model_requested"] for x in runs if x.get("model_requested")})
+        head = ([f"实际模型：`{' + '.join(models)}`。", ""] if models else
+                [f"请求模型（CLI 不回报实际模型）：`{' + '.join(requested)}`。", ""] if requested else [])
+        lines += [f"## {agent}", ""] + head + [
                   f"PASS {s[PASS]}，FAIL {s[FAIL]}，NOT_RUN {s[NOT_RUN]}，BLOCKED {s[BLOCKED]}"
                   + (f"（通过率 {s[PASS]}/{total}，95% 区间 {lo:.0%}–{hi:.0%}）" if repeat > 1 else "")
                   + f"；应触发用例中实际使用技能 {recall}，不应触发用例中误用技能 {false_rate}"
@@ -395,6 +423,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repeat", type=int, default=1, help="independent runs per case and agent")
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--judge-model", default=DEFAULT_JUDGE)
+    ap.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
+                    help=f"model passed to claude -p (default: {DEFAULT_CLAUDE_MODEL}; empty string: CLI default)")
+    ap.add_argument("--codex-model", default=DEFAULT_CODEX_MODEL,
+                    help=f"model passed to codex exec -m (default: {DEFAULT_CODEX_MODEL}; empty string: config default)")
+    ap.add_argument("--codex-effort", default=DEFAULT_CODEX_EFFORT,
+                    help=f"model_reasoning_effort for codex (default: {DEFAULT_CODEX_EFFORT}; empty string: config default)")
     ap.add_argument("--no-judge", action="store_true")
     ap.add_argument("--report", type=Path)
     ap.add_argument("--rejudge", type=Path, metavar="RUN_DIR", help="re-judge an existing run without rerunning agents")
@@ -472,6 +506,8 @@ def main(argv: list[str] | None = None) -> int:
     records.sort(key=lambda r: (r["agent"], order[r["id"]], r.get("rep", 1)))
     report = {"generated": time.strftime("%Y-%m-%d %H:%M:%S"), "commit": git_commit(),
               "judge_model": None if args.no_judge else args.judge_model, "repeat": args.repeat,
+              "claude_model": args.claude_model if "claude" in agents else None,
+              "codex_model": f"{args.codex_model} effort={args.codex_effort}" if "codex" in agents else None,
               "records": records,
               "summary": summarize(records, cases)}
     outdir.mkdir(parents=True, exist_ok=True)
