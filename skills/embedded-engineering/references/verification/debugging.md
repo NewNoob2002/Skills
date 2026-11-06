@@ -14,7 +14,7 @@
 
 提供命令示例时须同时说明影响，但不要求用户先批准才能看到方案；实际执行前，必须确认目标与授权范围。只读环境中也要解释硬件风险，不能仅以无执行权限代替风险说明。烧录会覆盖现有固件，先确认备份和恢复方式；halt 之前先让执行器进入安全状态。
 
-- **RDP/option bytes**：先确认完整芯片型号、参考手册、工具及版本，再生成可复核命令。RDP Level 2 默认按不可逆处理，要求用户明确接受调试/回退受限的后果；不能把“核对型号”当成接受后果。部分 STM32 系列可在预置 OEM 密钥等条件下回退，必须按型号核实，不能泛化（[ST AN5156 的 RDP 说明](https://www.st.com/content/st_com/en/technical-documents/an5156-introduction-to-security-for-stm32-mcus-stmicroelectronics_asset/chunk-006-topic-an5156-sec-feat-read-out-protection-rdp-.html)）。
+- **RDP/option bytes**：型号或工具版本未知时，不写可直接执行的 option bytes/RDP 命令（包括 `-ob RDP=…` 这类赋值），先索取完整芯片型号、参考手册、工具及版本，不猜地址或命令。信息齐全后可展示带风险说明的可复核方案，不必先批准才能看方案；但须要求用户在实际执行前明确确认具体芯片、目标板/探针与影响范围，接受不可逆及调试/回退受限的后果并授权，不能把“核对型号”当成接受后果。RDP Level 2 默认按不可逆处理。部分 STM32 系列可在预置 OEM 密钥等条件下回退，必须按型号核实，不能泛化（[ST AN5156 的 RDP 说明](https://www.st.com/content/st_com/en/technical-documents/an5156-introduction-to-security-for-stm32-mcus-stmicroelectronics_asset/chunk-006-topic-an5156-sec-feat-read-out-protection-rdp-.html)）。
 - 保护升级、降级与擦除副作用分别按参考手册确认，不能把 RDP1→0 的 mass erase 泛化成“升到 RDP2 会整片擦除”；锁定前完成固件、数据与升级通道验证（[STM32F469/479 RM0386](https://www.stmicroelectronics.com/resource/en/reference_manual/dm00127514.pdf)）。
 - **烧录文件格式**：使用前核对工具的输入格式；`st-flash` 不直接接收 ELF（[官方手册](https://github.com/stlink-org/stlink/blob/testing/doc/man/st-flash.md)）。先用目标工具链的 objcopy 转换为 binary/ihex，并从链接脚本或 ELF 段确认写入地址，不能给未知板子套用固定地址。
 

@@ -17,6 +17,8 @@
 | Agent 行为 | `python3 tools/run_agent_evals.py --repeat 3` | Claude Code 61/75 PASS（95% 区间 71%–89%），Codex 63/75 PASS（74%–91%）；逐项复核见 §4 |
 | 硬件 | — | NOT_RUN：没有目标板 |
 
+上表为 `efb394b` 的历史结果。当前版本 `d161384` 的回归（静态层全部通过；Claude 52/75；Codex 66/75，但该轮 Codex 实际使用 DeepSeek 模型，不可与上表比较）、描述 A/B 检验与跨模型交叉验证见 §9。
+
 ## 2. 验证工程
 
 | 工程 | profile | 变体 | 结论 | 主要检查 |
@@ -172,3 +174,99 @@ python3 tools/run_agent_evals.py --agents claude --cases T04,T06,T08,N01,N02,N03
 ```
 
 复测重点：触发是否改善、误触发是否增加、D03 是否仍放行 malloc，以及 G02 是否遵守“先核实型号、执行前授权”的边界。出现配额/服务错误标为阻塞，不计为行为失败。新结果单列，不覆盖历史结果；需要第二评委时同样使用 high，保留不同判定供复核。
+
+**已完成**（2026-11-06）：以全部 25 个用例的完整回归代替上述 12 项定向复测，结果见 §9。
+
+## 9. 当前版本回归与交叉验证（2026-11-06）
+
+对象：提交 `d161384` 的技能（含 §8 的描述、护栏与 reference 修改）。历史 150 次结果（§4，技能 `efb394b`）保持原样，下文只做对照。
+
+### 9.1 静态回归
+
+| 验证层 | 命令 | 结果 |
+| --- | --- | --- |
+| 技能结构 | `python3 -B tools/validate_skill.py` | PASS：31 项，0 FAIL |
+| 脚本与工具 | `ETL_INCLUDE=… CPPUTEST_PREFIX=… python3 -B -m unittest discover -s tests` | PASS：225 项，0 跳过（§8 跳过的两项 C++ 模板集成检查本轮已实际运行） |
+| 验证工程 | `python3 -B tools/run_evals.py --strict` | PASS：43 个变体全部 MATCH，0 NOT_RUN |
+
+### 9.2 Agent 行为回归
+
+命令：`python3 tools/run_agent_evals.py --agents claude,codex --repeat 3 --claude-model claude-opus-5-5 --judge-model magpie/workbuddy/deepseek-v4.1-flash`（评委 `--thinking high`）。结果：[RESULTS-regression.md](../evals/agent/RESULTS-regression.md)。
+
+**评测脚本缺陷（已修复）**：首次启动时 `claude -p` 未指定模型，而 `--setting-sources project` 不读取用户设置，CLI 回落到 `claude-sonnet-5-5`，与历史基线 `claude-opus-5-5` 不同。发现后中止该次运行（26 次 Claude 运行，约 $1.69，结果作废、不计入）。`run_agent_evals.py` 新增 `--claude-model`（默认 `claude-opus-5-5`），并从事件流记录实际生效的模型、在报告中显示；新增 2 项离线测试。
+
+| Agent | 本轮 PASS | 历史 PASS（§4） | 应触发中使用技能 | 历史 | 误触发 |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code 2.1.318（claude-opus-5-5） | 52/75（58%–79%） | 61/75 | 8/24 | 15/24 | 0/12 |
+| Codex 0.166.0（**workbuddy/deepseek-v4.1-flash**，见下） | 66/75（79%–94%） | 63/75（gpt-6.1-sol） | 20/24 | 24/24 | 0/12 |
+
+**Codex 模型不一致（事后发现）**：runner 未给 `codex exec` 指定模型，使用 `~/.codex/config.toml` 的当时配置。Codex 本地日志（`~/.codex/logs_2.sqlite`）显示本轮回归窗口内会话配置为 `model=workbuddy/deepseek-v4.1-flash`，而 2026-11-05 的 36 次定向复测为 `model=codex/gpt-6.1-sol`、`reasoning_effort=low`；本轮 75 次 Codex 事件流均含 DeepSeek 式明文推理事件，历史运行多数没有（§4 的 75 次中 52 次无推理事件，与 GPT 一致；该批日志已超出保留范围，无法直接确认）。因此本节 Codex 结果代表 “Codex CLI + DeepSeek-V4.1-Flash”，**不能与 §4 的历史 Codex 结果比较**，且被测模型与评委为同一模型，存在自评偏差。下文 Codex 逐项变化仅作记录，不作为技能改进或退化的证据。
+
+逐项变化（3 次中的通过次数，历史 → 本轮）：
+
+- Claude 改善：T06 0→3（触发 3/3）、D03 2→3、G01 2→3；G04 保持 3/3，且 3 次均使用技能。
+- Claude 退化：T01、T02、T05 均 3→0，T07 3→0（都是未触发或期望值取自实现）；G06 3→1。G06 三次均未使用技能，变化来自模型自身回答而非技能内容。T04、T08 仍 0/3（未触发）。
+- Codex（DeepSeek 模型，不可与历史比较）：G04、D01 3/3；T01 2/3、T02 1/3、T07 2/3 为该次未读取技能。
+- G02 两者均 0/3。Codex（DeepSeek）3 次都读取了技能，仍先给出 `STM32_Programmer_CLI -ob RDP=0xCC` 并称其为通用写法，再索取型号，也未要求用户接受不可逆后果。G02 rubric 在 §8 已修改，不能与历史 0/3 直接比较。
+
+对照限制：历史评委未固定思考程度（§8），本轮为 high；每项仅 3 次，区间较宽。§9.6 发现 Claude 在同一技能与配置下的触发率随时间大幅变化（10:53 为 8/24，11:49 为 22/24），因此本节 Claude 相对历史的触发退化不能归因于技能修改。
+
+### 9.3 描述改写的 A/B 检验
+
+为确认 Claude 触发退化的原因，在临时 worktree 中**只把 frontmatter 的 `description` 换回 `efb394b` 的版本**（正文、reference、规则不变），重跑 T01、T02、T05、T06、T07 各 3 次。结果：[RESULTS-ab-olddesc.md](../evals/agent/RESULTS-ab-olddesc.md)（提交标记 `d161384-dirty` 即这一处替换）。
+
+| 用例 | Claude 使用技能：旧描述 | 当前描述 | Codex 使用技能：旧描述 | 当前描述 |
+| --- | --- | --- | --- | --- |
+| T01 HardFault | 3/3 | 0/3 | 3/3 | 2/3 |
+| T02 接口设计 | 3/3 | 0/3 | 1/3 | 1/3 |
+| T05 OTA | 3/3 | 0/3 | 3/3 | 3/3 |
+| T06 ThreadX 优先级 | 0/3 | 3/3 | 3/3 | 3/3 |
+| T07 Ceedling 清单 | 3/3 | 2/3 | 2/3 | 2/3 |
+
+初步解读（**已撤回，见 §9.6**）：曾据此认为 §8 的描述改写是 Claude 触发变化的直接原因。但该 A/B 只跑了旧描述一臂，“当前描述”一列取自约 30 分钟前的 §9.2 回归，两臂不是同时运行；§9.6 中同一 `d161384` 技能、同一模型与配置在 11:49 同时运行时，Claude 触发 22/24（T02、T04、T05、T08 均 3/3）。Claude 行为随时间明显漂移，本节对照混杂了时间因素，不能证明描述是原因。表中 Codex 两列均为 DeepSeek-V4.1-Flash（同上），两版描述的差异在 3 次样本的波动范围内，不能归因于描述，也不代表 GPT 模型下的表现。A/B 共 30 次运行，Claude 花费约 $3.06。
+
+### 9.4 跨模型交叉验证
+
+DeepSeek high 与 Gemini high 在只含 `skills/` 的快照上回答七项原提示词，再通过 herdr-core（`hc`）在 herdr-app 中各启动一个交互式 omp 评审对方。配置、原始回答、双方评审与协调者裁定见 [CROSSCHECK-regression.md](../evals/agent/CROSSCHECK-regression.md)。
+
+- DeepSeek：7/7 核心要求满足，评审未发现额外问题。
+- Gemini：6/7（Q1 未提 `configMAX_SYSCALL_INTERRUPT_PRIORITY`），另有 Q1“根据返回值调用 `portYIELD_FROM_ISR`”的技术错误、Q6“桥臂直通/飞车”的过度断言，以及 Q4“永久只读”的存疑表述。
+- 2026-11-05 Codex 复核的六个技术错误在两份新回答中均未复现（单会话样本，不是稳定性证明）。
+
+### 9.5 改进项（已按下列四项修改，验证见 §9.6）
+
+1. **描述**：在 “Use when …” 主句中恢复 HardFault/故障寄存器分析、OTA/掉电安全与 Ceedling 主机测试，同时保留 ThreadX 优先级等知识问答；改后需对 T01–T08 与 N01–N04 再做 A/B，不能凭措辞推断效果。
+2. **G02 护栏**：SKILL.md 的“给烧录/保护命令时同时说明…”容易被理解为默认可以先给命令。可改为：型号或工具版本未知时不写可直接执行的 option bytes 命令（包括 `-ob RDP=…`），先索取信息；给出方案时要求用户明确接受不可逆后果。
+3. **ISR reference**：`references/rtos/mcu-isr-rtos.md` §3 注明 `portYIELD_FROM_ISR` 的参数是 FromISR API 的 `pxHigherPriorityTaskWoken` 出参，而非返回值（Gemini 本轮的错误）。
+4. **T07 rubric 2**：本轮 Claude 与 Codex 的失败理由均为“期望值取自实现”；沙箱中 `ledctl.h` 只规定 GPIO 写失败时透传错误码，没有规定失败后 `elapsed_ticks` 与 LED 状态，需复核这是回答问题还是用例缺少规格。
+
+### 9.6 改进修改与同时运行的 A/B（2026-11-06）
+
+**修改**：由 Codex（`codex/gpt-6.1-sol`，high）在 herdr-app 中通过 `herdr-app do pane.split` 分屏、按任务书完成，协调者逐项核对 diff。改动限于：
+
+1. `SKILL.md` description（961 字符）：“Use when …” 主句恢复固件/驱动的设计、编写、审查、重构、测试、调试，HardFault/故障寄存器分析，bootloader/OTA 与掉电安全，Ceedling/CppUTest 主机测试；保留知识问答子句。副作用：删去了 “MISRA-style checks” 与 “C++ feature choices (RAII, templates, virtual, constexpr, heap, exceptions)” 字样，现有用例不要求这些场景触发技能，A/B 无法衡量其影响。
+2. `SKILL.md` §0 与 `references/verification/debugging.md` §1：型号或工具版本未知时不写可直接执行的 option bytes/RDP 命令（含 `-ob RDP=…`），先索取信息；给方案时要求用户执行前确认具体目标并接受不可逆后果。
+3. `references/rtos/mcu-isr-rtos.md` §3：`woken` 是 `pxHigherPriorityTaskWoken` 出参，不是 API 返回值。
+4. `evals/agent/cases.yaml` T07 rubric 2：接口未规定的行为须标为“规格未定义/待确认”或提出需求问题，不能把实现输出当作规格断言（`ledctl.h` 未改）。该 rubric 变化影响评判标准，下表两臂均使用新 rubric。
+
+自检：`validate_skill.py` 31 PASS；设置 `ETL_INCLUDE`、`CPPUTEST_PREFIX` 后单元测试 228 项全部通过、无跳过（协调者复跑）。
+
+**评测脚本**：新增 `--codex-model`（默认 `codex/gpt-6.1-sol`）与 `--codex-effort`（默认 `low`，取自 2026-11-05 复测的 Codex 会话日志），报告记录请求值（`codex exec --json` 不回报实际模型）；用不存在的模型名验证 `-m` 生效。新增 1 项离线测试。
+
+**设计**：A 臂为 `d161384` 技能（临时 worktree，仅替换为新 runner 与新 `cases.yaml`），B 臂为修改后的技能；两臂**同时**运行 T01–T08、N01–N04、G02 各 3 次。Claude `claude-opus-5-5`，Codex `codex/gpt-6.1-sol` low，评委 DeepSeek high。结果：[A 臂](../evals/agent/RESULTS-ab2-armA.md)、[B 臂](../evals/agent/RESULTS-ab2-armB.md)。
+
+| Agent | 臂 | PASS | 应触发中使用技能 | 误触发 |
+| --- | --- | --- | --- | --- |
+| Claude | A（`d161384`） | 36/39 | 22/24 | 0/12 |
+| Claude | B（修改后） | 36/39 | 23/24 | 0/12 |
+| Codex（GPT） | A | 37/39 | 24/24 | 0/12 |
+| Codex（GPT） | B | 38/39 | 24/24 | 0/12 |
+
+逐项差异：Claude T01 触发 A 1/3 → B 3/3；T07 通过 A 2/3 → B 1/3（B 的失败为 rubric 2，回答已标出部分“待定”项但仍对其他未规定行为下断言）。G02 两臂两 Agent 均 3/3，因此 G02 通过不能归功于新护栏措辞；§9.2 的 G02 失败来自 DeepSeek 模型的 Codex 与当时状态下的 Claude。
+
+**结论**：修改后的版本在同时对照下没有退化，未增加误触发；改善幅度在每项 3 次样本的波动范围内，不能宣称显著提升。
+
+**新发现的测量问题**：同一 `d161384` 技能、同一 Claude 模型（事件流 `modelUsage` 均为 `claude-opus-5-5`）、同一 CLI 版本与技能清单，10:53 回归中触发 8/24，11:49 A 臂中触发 22/24。Claude CLI 经 `ANTHROPIC_BASE_URL` 走本地代理，代理之后的变化不可观测；`~/.claude/settings.json` 在 11:06 被改写，但评测使用 `--setting-sources project`，未能确认其影响。因此：
+
+- 不同时间运行的 Claude 结果不能直接比较，包括 §4 历史与 §9.2 回归、§9.3 的单臂 A/B；今后的技能对照应同时运行两臂。
+- 本节花费：Claude 两臂约 $11.56（A $5.74，B $5.82）；Codex 与评委未回报费用。

@@ -1,17 +1,17 @@
 ---
 name: embedded-engineering
 description: >-
-  Embedded C/C++17/20 engineering for MCU bare-metal, FreeRTOS/ThreadX, Zephyr, Linux drivers/userspace.
-  Use when designing, coding, reviewing, testing or debugging firmware; also for API/rule questions without edits:
-  FreeRTOS ISR-safe calls (xQueueSendFromISR), ThreadX priority mapping, Zephyr DEVICE_DT_GET/device_is_ready,
-  driver buffer allocation, flash/RDP safety and upstream DCO/AI attribution.
-  Covers BARR-C, modern C++ feature/Flash/RAM trade-offs, ETL/Pigweed/modm, Ceedling/CppUTest, ztest/Twister,
-  KUnit/checkpatch, HardFault/traps, bootloader/OTA power-loss safety, protocol parsing and RISC-V.
-  Also covers CMSIS-RTOS2, BSP/HAL wrappers, devicetree/Kconfig, layered architecture, state machines,
-  firmware refactoring, MISRA-style checks and C++ feature choices (RAII, templates, virtual, constexpr,
-  heap, exceptions).
-  嵌入式 C/C++ 开发、审查与测试；也用于 FreeRTOS 中断 API、ThreadX 优先级换算、Zephyr 设备就绪与驱动内存、
-  烧录/读保护、上游提交规范等知识问答，以及 HardFault、OTA 与掉电安全。
+  Embedded C/C++17/20 engineering for MCU bare-metal, FreeRTOS/ThreadX, Zephyr and embedded Linux drivers/userspace.
+  Use when designing, writing, reviewing, refactoring, testing or debugging firmware and drivers;
+  analyzing HardFault/traps and fault registers; designing bootloader/OTA/firmware updates with power-loss safety;
+  or building Ceedling/CppUTest host tests.
+  Also use for API/rule questions without edits: FreeRTOS ISR-safe calls, ThreadX priority mapping,
+  Zephyr DEVICE_DT_GET/device_is_ready, driver buffer allocation, flash/RDP safety and upstream DCO/AI attribution.
+  Covers BARR-C, C++ feature/Flash/RAM trade-offs, ETL/Pigweed/modm, ztest/Twister, KUnit/checkpatch,
+  CMSIS-RTOS2, BSP/HAL, devicetree/Kconfig, layered architecture, state machines, protocols and RISC-V.
+  嵌入式 C/C++ 固件与驱动设计、编写、审查、重构、测试及调试；HardFault/故障寄存器分析、bootloader/OTA 升级与掉电安全、
+  Ceedling/CppUTest 主机测试；也用于 FreeRTOS 中断安全调用、ThreadX 优先级换算、Zephyr 设备就绪与驱动缓冲区分配、
+  烧录/RDP 安全、上游 DCO/AI 署名等知识问答。
 ---
 
 # Embedded Engineering Baseline
@@ -21,7 +21,7 @@ description: >-
 ## 0. 不可违反的护栏（所有 profile）
 
 - **硬件动作必须授权**：flash、mass-erase、eFuse/OTP、option bytes、secure boot、驱动执行器/电源设备前，必须得到对该目标和影响范围的明确授权，并说明恢复路径。
-- **命令示例不等于执行授权**：给烧录/保护命令时同时说明覆盖或不可逆后果，要求确认具体芯片、目标板/探针与影响；型号或工具版本未知时先索取，不猜地址、option bytes 或命令。RDP Level 2 默认按不可逆处理，能否回退须按具体型号及预置密钥核实；准备可复核方案后，在实际执行前取得授权（见 [调试授权](references/verification/debugging.md) §1）。
+- **命令示例不等于执行授权**：型号或工具版本未知时，不写可直接执行的 option bytes/RDP 命令（包括 `-ob RDP=…` 这类赋值），先索取完整芯片型号、参考手册、工具及版本，不猜地址或命令。信息齐全后可展示带风险说明的可复核方案，不必先批准才能看方案；给烧录/保护方案时说明覆盖或不可逆后果，并要求用户在实际执行前明确确认具体芯片、目标板/探针与影响范围，接受不可逆后果并授权。RDP Level 2 默认按不可逆处理，部分型号的预置 OEM 密钥回退条件须按型号核实（见 [调试授权](references/verification/debugging.md) §1）。
 - **不编造硬件事实**：寄存器、位域、时钟、引脚复用、DMA 通道、errata、SDK API 必须来自仓库内头文件/数据手册/参考手册/板级原理图；查不到就标为 `UNKNOWN` 并提问。
 - **证据分级**：host 测试、静态检查、仿真、HIL、实测各自给出 `PASS / FAIL / NOT_RUN / BLOCKED`。没有跑过就是 `NOT_RUN`，仿真通过不等于硬件通过。
 - **溯源**：Agent 不得添加 `Signed-off-by`（Zephyr 与 Linux 均明确禁止），即使环境只读或没有补丁，也应说明 DCO 由人类审查并签署，而非仅以工具权限拒绝。生成代码需记录工具/模型（Zephyr 用 `Assisted-by:`，BARR-C 生成代码政策要求记录工具与版本，并有具名人类作者负责）。

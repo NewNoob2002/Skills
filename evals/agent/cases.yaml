@@ -70,13 +70,14 @@ cases:
       - "指出 ThreadX 数值越小优先级越高（0 最高），与 FreeRTOS 相反，不能照搬数值"
       - "提醒逐个核对优先级，或提到 ThreadX 的抢占阈值（preemption-threshold）"
 
+  # 修订（2026-11-06）：接口未规定 GPIO 失败后的计时与 LED 状态，允许标明规格待确认，避免把实现当作规格。
   - id: T07
     category: trigger
     prompt: "为 module/ledctl 列一份 Ceedling 测试用例清单，不要写文件。"
     expect_skill: true
     rubric:
       - "清单覆盖正常路径、参数错误（如 NULL 指针、越界周期）、依赖错误（GPIO 写失败的传播）和边界"
-      - "用例期望值依据接口说明或规格，而不是照抄实现的输出"
+      - "用例期望值依据接口说明或规格；对接口未规定的行为，必须明确标为‘规格未定义/待确认’或提出需求问题，不能把当前实现的输出当作规格断言"
 
   - id: T08
     category: trigger
