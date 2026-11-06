@@ -1,0 +1,29 @@
+# profile：esp-idf。适用规则 = standards/rules.yaml 中 profiles 含本 id 或 all 的条目。
+id: esp-idf
+summary: "ESP-IDF v6.x 应用与组件（ESP32 等 Xtensa 目标、ESP32-S31 等 RISC-V 目标）"
+evidence: "scripts/detect_profile.py：sdkconfig/sdkconfig.defaults、idf_component.yml、dependencies.lock、idf_component_register、$ENV{IDF_PATH}/tools/cmake/project.cmake、partitions.csv"
+coding:
+  c: "ESP-IDF Style Guide（Astyle；4 空格、函数花括号换行、行宽 120、s_ 前缀、#pragma once）+ BARR-C 安全核心中不冲突的部分"
+  cpp: "references/cpp/coding.md，按资源等级取舍特性；与 C SDK 的边界用 extern \"C\" 与 esp_err_t 映射"
+architecture: "ESP-IDF 组件模型：idf_component_register 显式依赖、Kconfig/sdkconfig 配置、驱动 API 封装硬件；架构专属代码按 Xtensa/RISC-V 隔离"
+references:
+  - references/platforms/esp-idf.md
+  - references/rtos/mcu-isr-rtos.md
+  - references/platforms/riscv.md
+  - references/profiles.md
+  - references/cpp/coding.md
+  - references/cpp/features.md
+  - references/architecture/state-protocol-fault.md
+  - references/architecture/boot-update.md
+  - references/verification/debugging.md
+tests:
+  c: "IDF Unity（test_apps/）；不依赖 IDF 的纯逻辑可用 Ceedling 或 IDF linux 目标做 host 测试"
+  cpp: "IDF Unity 或 CppUTest（纯逻辑 host 测试）"
+  target: "pytest-embedded 上板运行；至少构建一个 Xtensa 目标与一个 RISC-V 目标；无开发板记 NOT_RUN"
+gates:
+  - tool: idf_build
+    run: "idf.py set-target <target> && idf.py build && idf.py size-components（Xtensa 与 RISC-V 目标各一次）"
+  - tool: idf_astyle
+    run: "pre-commit run --files <files> astyle_py（项目已配置时）"
+  - tool: idf_pytest
+    run: "pytest --target <target> <test_apps>（pytest-embedded，需开发板）"

@@ -270,3 +270,22 @@ DeepSeek high 与 Gemini high 在只含 `skills/` 的快照上回答七项原提
 
 - 不同时间运行的 Claude 结果不能直接比较，包括 §4 历史与 §9.2 回归、§9.3 的单臂 A/B；今后的技能对照应同时运行两臂。
 - 本节花费：Claude 两臂约 $11.56（A $5.74，B $5.82）；Codex 与评委未回报费用。
+
+## 10. ESP-IDF 支持（2026-11-06）
+
+新增 `esp-idf` profile，覆盖 ESP-IDF v6.x，以及 Xtensa（ESP32）与 RISC-V（ESP32-S31）两类目标：
+
+- `references/platforms/esp-idf.md`：版本与目标、组件与 Style Guide、IDF SMP FreeRTOS、IRAM/Flash cache、错误处理与看门狗、Xtensa/RISC-V 兼容与故障分析、OTA 回滚与不可逆安全操作、测试、v5→v6 迁移。所列 API 与配置项已对照 ESP-IDF Programming Guide v6.1 核实；未逐条核对的点列在该文末尾。
+- ESP32-S31 在 IDF v6.1 中是 **preview** 目标（`IDF_ENV_BRINGUP`），参考文档中已注明，不按量产级支持处理。
+- `standards/rules.yaml`：新增 `ESP-001`–`ESP-009`；`esp-idf` 复用 54 条现有规则（ISR、RTOS、DMA、C++、BOOT、ERR、FAULT、DBG、RV 等）。BARR-C 格式/命名层与 `ARCH-001`–`ARCH-006` 分层规则不适用；`C-016` 与 `ESP-006`（`#pragma once`）的冲突已双向登记。
+- `scripts/detect_profile.py`：按 `project.cmake`、`idf_component_register`、`sdkconfig*`、`idf_component.yml`/`dependencies.lock`、分区表识别，新增 1 项测试（含 FreeRTOSConfig.h 与 xtensa 工具链干扰时仍判为 `esp-idf`）。
+- 新增 `idf_build`、`idf_astyle`、`idf_pytest` 三个外部门禁工具。本机没有安装 ESP-IDF，**三者均未实际运行（NOT_RUN）**；也没有 ESP-IDF 验证工程或开发板。
+
+Agent 行为（新增 E01 cache/IRAM 中断、E02 eFuse/Flash Encryption 护栏、E03 SMP 临界区，各 3 次，同一批同时运行；Claude `claude-opus-5-5`，Codex `codex/gpt-6.1-sol` low，评委 DeepSeek high）：结果见 [RESULTS-espidf.md](../evals/agent/RESULTS-espidf.md)。
+
+| Agent | E01 | E02 | E03 | 使用技能 |
+| --- | --- | --- | --- | --- |
+| Claude | 3/3 | 2/3 | 3/3 | 8/9 |
+| Codex | 3/3 | 3/3 | 3/3 | 9/9 |
+
+Claude E02 唯一一次失败**没有加载技能**：回答给出了标注“可以直接用”、带 `--do-not-confirm` 的 `espefuse.py` 烧写命令。加载技能的两次都通过。因此这是触发问题，不是护栏文本缺失。每项只有 3 次，样本很小；Claude 的触发率随时间漂移（§9.6），不能据此给出稳定通过率。

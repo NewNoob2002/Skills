@@ -16,6 +16,7 @@
 | `mcu-baremetal` | BARR-C 全量 | BARR-C 全量 + 项目 MISRA（如有） | `architecture/mcu-architecture.md` | Ceedling（C）/ CppUTest（C++） | BARR-C 生成代码政策 |
 | `mcu-rtos` | BARR-C 全量 | 同上 + `rtos/mcu-isr-rtos.md` | `architecture/mcu-architecture.md` | Ceedling（C）/ CppUTest（C++） | BARR-C 生成代码政策 |
 | `zephyr` | Zephyr code style | Zephyr coding guidelines（MISRA C:2012 子集）+ BARR-C 安全核心中不冲突部分 | Zephyr 设备模型 | ztest + Twister | Zephyr DCO / `Assisted-by` |
+| `esp-idf` | ESP-IDF Style Guide（Astyle，`#pragma once`，行宽 120） | ESP-IDF 规则（`ESP-*`）+ BARR-C 安全核心中不冲突部分 | IDF 组件模型（[platforms/esp-idf.md](platforms/esp-idf.md)） | IDF Unity + pytest-embedded；纯逻辑 Ceedling/CppUTest | 上游按 Espressif 贡献协议；`GEN-004` |
 | `linux-kernel` | `coding-style.rst` + checkpatch | 内核惯例 + BARR-C 安全核心中不冲突部分 | 内核子系统框架 | KUnit / kselftest | DCO、工具生成内容披露 |
 | `linux-userspace` | 项目既有；无则 BARR-C 格式层可选 | BARR-C 安全核心 | 平台隔离 | 项目既有；无则 Ceedling（C）/ CppUTest（C++） | 项目约定 |
 
@@ -41,6 +42,8 @@
 | `volatile` | 1.8.c（线程共享用途已撤回） | 寄存器经设备 API 访问 | `volatile` 视为有害，用 `READ_ONCE`/`readl` | 任何 profile 都不得用 `volatile` 做线程同步 |
 | ISR 命名 `_isr`（6.5.b） | 要求 | 不要求 | `*_irq_handler` 等惯例 | MCU：自写 ISR 用 `_isr`；向量表固定名（`USART1_IRQHandler`）为记录在案的例外 |
 | 头文件保护 | `#ifndef` guard（4.2.b），`#pragma` 受限（1.1.c） | `#ifndef ZEPHYR_..._H_` guard | `#ifndef _LINUX_FOO_H` guard | 统一用 guard，不用 `#pragma once` |
+
+**ESP-IDF**（`esp-idf` profile，依据 ESP-IDF Style Guide，见 [platforms/esp-idf.md](platforms/esp-idf.md) §2）：4 空格缩进、禁止 tab；函数定义花括号换行、控制语句花括号同行；行宽 120；静态变量 `s_` 前缀而非 `g_`/`p_`/`b_`；头文件用 `#pragma once`（与 `C-016` 冲突，按 `ESP-006` 裁决）；`//` 注释允许。BARR-C 格式/命名层不用于 IDF 组件，安全核心中不冲突的规则仍适用。
 
 ## 4. 上游与私有代码
 

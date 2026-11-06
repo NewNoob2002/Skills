@@ -21,6 +21,7 @@
 
 | Cortex-M fault 分析 | ARMv7-M Architecture Reference Manual（ARM DDI 0403）、ARMv8-M Architecture Reference Manual（ARM DDI 0553） | CFSR/HFSR/MMFAR/BFAR 地址与位、异常栈帧、EXC_RETURN（[verification/debugging.md](verification/debugging.md) §2） | ARM 文档 |
 | RISC-V | RISC-V Unprivileged / Privileged Specification（<https://riscv.org/specifications/>） | mcause 异常码、A 扩展、RVWMO、psABI 栈对齐（[platforms/riscv.md](platforms/riscv.md)） | CC-BY-4.0 |
+| ESP-IDF | ESP-IDF Programming Guide v6.1 与 v6.0 发布说明（<https://docs.espressif.com/projects/esp-idf/>，核实于 2026-11-06） | IDF FreeRTOS SMP、Flash cache 与 IRAM、RISC-V panic 寄存器、Style Guide、OTA 回滚、Flash Encryption、v6 迁移（[platforms/esp-idf.md](platforms/esp-idf.md)） | Apache-2.0 |
 | ThreadX | Eclipse ThreadX（<https://github.com/eclipse-threadx/threadx>）用户手册与 `tx_api.h` | 优先级语义、抢占阈值、ISR 服务调用、内存池（[rtos/threadx.md](rtos/threadx.md)） | MIT |
 | 启动与升级 | MCUboot 设计文档（<https://docs.mcuboot.com/>） | 交换模式、镜像确认与回滚、防回滚计数器（[architecture/boot-update.md](architecture/boot-update.md)） | Apache-2.0 |
 | Agent Skills 规范 | <https://agentskills.io/specification>（核实于 2026-11-05） | frontmatter 约束、目录结构、引用深度；由 `tools/validate_skill.py` 机械检查 | — |
@@ -37,4 +38,5 @@
 - CppUTest 新发布版（v4.0 之后）的 CMake 目标名与 CMake 版本要求。
 - BARR-C:2026 版发布后（官方 kit 计划提供 `2026/` 目录与机器可读规则清单），替换本技能的 2018 基线。
 - P3 新增的 riscv、threadx、boot-update 参考，以及 debugging 中的栈帧/EXC_RETURN 描述，尚未逐条对照原文核实（见上表“核实状态”）。
+- ESP-IDF：ESP32-S31 在 v6.1 中为 preview 目标，转为正式支持后复核 [platforms/esp-idf.md](platforms/esp-idf.md) §1；该文“来源”末尾列出的未逐条核对项。
 - computerguided/embedded-software-development-guidelines 尚未研究（原计划列入 P2，未完成）。

@@ -8,7 +8,7 @@
 | MCU 架构规则 | rovinax/embedded-skills（已修订） | `references/architecture/mcu-architecture.md`、`references/rtos/mcu-isr-rtos.md`、`scripts/arch_lint.py` |
 | C 代码规范 | BARR-C:2018 + Barr Group 官方 enforcement kit | `references/c/barr-c.md`、`assets/barr-c/`、`scripts/barrc/check.sh` |
 | MCU 测试 | Ceedling 1.x（Unity + CMock） | `references/verification/ceedling.md`、`assets/ceedling/project.yml`、`assets/templates/tests/` |
-| 平台官方规范 | Zephyr、Linux kernel 树内文档 | `references/platforms/zephyr.md`、`references/platforms/linux-kernel.md`、`references/platforms/linux-userspace.md` |
+| 平台官方规范 | Zephyr、Linux kernel 树内文档、ESP-IDF v6.1 Programming Guide | `references/platforms/zephyr.md`、`references/platforms/esp-idf.md`、`references/platforms/linux-kernel.md`、`references/platforms/linux-userspace.md` |
 | Modern Embedded C++ | Pigweed、modm、ETL、C++ Core Guidelines、Zephyr C++ 文档 + 本地实测开销 | `references/cpp/coding.md`、`references/cpp/features.md`、`references/cpp/patterns.md`、`assets/cpp/`、`scripts/cpp_cost.py`、`scripts/bench/` |
 | C++ 测试 | CppUTest + CppUMock | `references/verification/cpp-testing.md`、`assets/cpp/templates/tests/` |
 
@@ -18,7 +18,7 @@
 - **AGENTS.md（项目内）**：保存这个仓库特有、必须每次都知道的事实，如芯片型号、SDK 版本、构建/测试命令、硬件授权范围。这些信息不应该写进通用技能。
 - **脚本与配置**：可以机械检查的规则（格式、命名、分层依赖）交给工具判定，而不是靠模型“记得遵守”。BARR-C 部分直接使用 Barr Group 官方 kit。
 
-这几个来源之间互相冲突，例如 BARR-C 要求 Allman 花括号、4 空格缩进和 `g_` 前缀，Linux 要求 tab、K&R 风格且禁止类型前缀，Zephyr 禁止 `//` 注释。技能先判定 **profile**（`mcu-baremetal`、`mcu-rtos`、`zephyr`、`linux-kernel`、`linux-userspace`），再按 `references/profiles.md` 的冲突裁决矩阵决定用哪套规则。BARR-C 拆成“安全核心”（全 profile 适用）和“格式/命名层”（仅 MCU）。
+这几个来源之间互相冲突，例如 BARR-C 要求 Allman 花括号、4 空格缩进和 `g_` 前缀，Linux 要求 tab、K&R 风格且禁止类型前缀，Zephyr 禁止 `//` 注释。技能先判定 **profile**（`mcu-baremetal`、`mcu-rtos`、`zephyr`、`esp-idf`、`linux-kernel`、`linux-userspace`），再按 `references/profiles.md` 的冲突裁决矩阵决定用哪套规则。BARR-C 拆成“安全核心”（全 profile 适用）和“格式/命名层”（仅 MCU）。
 
 C++ 部分不简单禁止现代特性，而是按资源等级（T0 极小 MCU … T3 Linux 用户态）和实时路径取舍，取舍依据是在 Cortex-M0+/M4 上实测的 Flash/RAM 增量。
 
@@ -51,7 +51,7 @@ skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此�
 │   ├── c/                      #   BARR-C 规则
 │   ├── cpp/                    #   C++ 编码、特性取舍（T0–T3）、模式
 │   ├── rtos/                   #   ISR、RTOS、DMA、看门狗、ThreadX
-│   ├── platforms/              #   Zephyr、Linux kernel、Linux userspace、RISC-V
+│   ├── platforms/              #   Zephyr、ESP-IDF v6.x、Linux kernel、Linux userspace、RISC-V
 │   └── verification/           #   Ceedling、CppUTest、审查清单、调试与故障分析
 ├── scripts/
 │   ├── detect_profile.py       # profile 识别（只读，JSON）

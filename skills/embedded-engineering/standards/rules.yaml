@@ -21,7 +21,7 @@
 
 version: 1
 
-profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-kernel, linux-userspace]
+profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf, linux-kernel, linux-userspace]
 
 sources:
   skill: "本技能的护栏与工作流（brunofbloq/embedded-agent-skills 结构，独立改写）"
@@ -29,6 +29,7 @@ sources:
   barr-c: "BARR-C:2018 Embedded C Coding Standard 与 Barr Group enforcement kit"
   freertos: "FreeRTOS 官方文档（Cortex-M 中断优先级、FromISR API、静态分配）"
   cmsis-rtos2: "CMSIS-RTOS2 API 文档（ISR 中可调用函数与超时约束）"
+  esp-idf: "ESP-IDF Programming Guide v6.1（FreeRTOS IDF、Flash 并发、Fatal Errors、Style Guide、OTA、Flash Encryption）与 v6.0 发布说明"
   zephyr: "Zephyr 官方 Code Style / Coding Guidelines / Contribution Guidelines / ztest 文档"
   linux: "Linux 内核树 Documentation/process/ 与 dev-tools/kunit/"
   core-guidelines: "C++ Core Guidelines"
@@ -43,6 +44,12 @@ sources:
   mcuboot: "MCUboot 官方设计文档"
 
 verify_tools:
+  idf_build:
+    external: "idf.py set-target <target> && idf.py build"
+  idf_astyle:
+    external: "pre-commit run --files <files> astyle_py"
+  idf_pytest:
+    external: "pytest --target <target> <test_apps>（pytest-embedded）"
   arch_lint:
     path: scripts/arch_lint.py
     checks: [layer_dependency, forbidden_include, hal_call, register_access, cycle]
@@ -145,7 +152,7 @@ rules:
   - id: GEN-007
     title: "厂商生成代码（CubeMX、MCUXpresso、platform/）不重排、不格式化，只在 USER CODE 保护区修改，并排除出格式门禁"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [c, cpp]
     source: [skill]
     ref: references/profiles.md §4
@@ -155,7 +162,7 @@ rules:
   - id: GEN-008
     title: "向 Zephyr、Linux 主线或厂商上游提交的代码只使用该上游规范，不混入 BARR-C 格式或 g_ 前缀"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-kernel, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-kernel, linux-userspace, esp-idf]
     lang: [c]
     source: [skill, zephyr, linux]
     ref: references/profiles.md §4
@@ -271,7 +278,7 @@ rules:
   - id: ARCH-007
     title: "器件驱动状态放在设备上下文结构体中，不用文件级全局状态；初始化分阶段且逐步检查返回值"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax]
     ref: references/architecture/mcu-architecture.md §4
@@ -303,7 +310,7 @@ rules:
   - id: C-002
     title: "模块外不需要的函数和变量一律 static；私有函数 static，公共函数在头文件中有原型"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [c]
     source: [barr-c]
     ref: references/c/barr-c.md §2
@@ -313,7 +320,7 @@ rules:
   - id: C-003
     title: "不注释掉代码；临时禁用用 #if 0"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace, esp-idf]
     lang: [c, cpp]
     source: [barr-c, zephyr]
     ref: [references/c/barr-c.md §2, references/platforms/zephyr.md §2]
@@ -323,7 +330,7 @@ rules:
   - id: C-004
     title: "整数宽度重要时用 stdint.h 定宽类型；char 只用于字符"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace, esp-idf]
     lang: [c]
     source: [barr-c, zephyr]
     ref: references/c/barr-c.md §2
@@ -333,7 +340,7 @@ rules:
   - id: C-005
     title: "位运算符不作用于有符号操作数"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c]
     source: [barr-c]
     ref: references/c/barr-c.md §2
@@ -345,7 +352,7 @@ rules:
   - id: C-006
     title: "比较与算术中不混用有符号与无符号"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [c]
     source: [barr-c]
     ref: [references/c/barr-c.md §2, references/c/barr-c.md §4]
@@ -359,7 +366,7 @@ rules:
   - id: C-007
     title: "不对浮点做 == / != 比较"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [c, cpp]
     source: [barr-c]
     ref: [references/c/barr-c.md §2, references/c/barr-c.md §4]
@@ -373,7 +380,7 @@ rules:
   - id: C-008
     title: "映射硬件寄存器或通信帧的结构体防止填充与位序变化，并用 static_assert(sizeof) 校验"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [c]
     source: [barr-c]
     ref: [references/c/barr-c.md §2, references/c/barr-c.md §5]
@@ -383,7 +390,7 @@ rules:
   - id: C-009
     title: "能写成函数就不用带参宏；带参宏整体与每个参数加括号、参数只用一次、不含控制转移"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c]
     source: [barr-c]
     ref: references/c/barr-c.md §2
@@ -396,7 +403,7 @@ rules:
   - id: C-010
     title: "变量使用前初始化；尚无地址的指针初始化为 NULL"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace, esp-idf]
     lang: [c]
     source: [barr-c]
     ref: references/c/barr-c.md §2
@@ -410,7 +417,7 @@ rules:
   - id: C-011
     title: "if / else if 条件中不赋值"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [c]
     source: [barr-c]
     ref: [references/c/barr-c.md §2, references/c/barr-c.md §4]
@@ -424,7 +431,7 @@ rules:
   - id: C-012
     title: "每个 switch 有 default"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [c]
     source: [barr-c]
     ref: references/c/barr-c.md §2
@@ -452,7 +459,7 @@ rules:
   - id: C-014
     title: "禁止隐式函数声明"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [c]
     source: [barr-c]
     ref: references/c/barr-c.md §4
@@ -483,6 +490,8 @@ rules:
     ref: [references/c/barr-c.md §2, references/profiles.md §3]
     verify:
       method: review
+    except: "esp-idf 组件按 ESP-IDF Style Guide 使用 #pragma once（ESP-006）"
+    conflicts: [ESP-006]
 
   - id: C-017
     title: "每个强制类型转换配注释说明数值范围为何安全"
@@ -610,7 +619,7 @@ rules:
   - id: ISR-001
     title: "ISR 只捕获事件：不解析协议、不做控制计算、不打日志、不分配内存、不阻塞、不调用非 ISR 安全 API"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax, barr-c]
     ref: [references/rtos/mcu-isr-rtos.md §1, references/cpp/coding.md §7]
@@ -620,7 +629,7 @@ rules:
   - id: ISR-002
     title: "写 1 清除（W1C）的状态寄存器直接赋值，不用 |= 读-改-写"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax]
     ref: references/rtos/mcu-isr-rtos.md §2
@@ -630,7 +639,7 @@ rules:
   - id: ISR-003
     title: "ISR 与任务共享数据优先用队列、SPSC 环形缓冲或任务通知；多字节数据不能只靠 volatile"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax, barr-c]
     ref: references/rtos/mcu-isr-rtos.md §2
@@ -640,7 +649,7 @@ rules:
   - id: ISR-004
     title: "FreeRTOS 的 ISR 只用 FromISR API 并以 portYIELD_FROM_ISR 结束；CMSIS-RTOS2 在 ISR 中调用时超时必须为 0"
     level: mandatory
-    profiles: [mcu-rtos]
+    profiles: [mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [freertos, cmsis-rtos2]
     ref: references/rtos/mcu-isr-rtos.md §3
@@ -660,7 +669,7 @@ rules:
   - id: ISR-006
     title: "每个 ISR 按项目截止期限设定时间预算并实测（GPIO 打点、DWT CYCCNT 或 trace），未测记 NOT_RUN"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax]
     ref: [references/rtos/mcu-isr-rtos.md §1, references/verification/cpp-testing.md §7]
@@ -680,7 +689,7 @@ rules:
   - id: RTOS-001
     title: "周期任务用绝对时间延时（xTaskDelayUntil / osDelayUntil），不用累积漂移的相对延时"
     level: mandatory
-    profiles: [mcu-rtos]
+    profiles: [mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax, freertos]
     ref: references/rtos/mcu-isr-rtos.md §4
@@ -690,7 +699,7 @@ rules:
   - id: RTOS-002
     title: "每个任务有栈预算，开启栈溢出检测，并用水位线实测余量"
     level: mandatory
-    profiles: [mcu-rtos]
+    profiles: [mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax, freertos]
     ref: [references/rtos/mcu-isr-rtos.md §4, references/cpp/coding.md §6]
@@ -701,7 +710,7 @@ rules:
   - id: RTOS-003
     title: "内核对象静态创建，初始化完成后不再动态分配"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax, freertos]
     ref: references/rtos/mcu-isr-rtos.md §4
@@ -712,7 +721,7 @@ rules:
   - id: RTOS-004
     title: "每个外设或总线只有一个所有者任务，其他任务经所有者的 API 或队列访问"
     level: advisory
-    profiles: [mcu-rtos]
+    profiles: [mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax]
     ref: references/rtos/mcu-isr-rtos.md §4
@@ -722,7 +731,7 @@ rules:
   - id: RTOS-005
     title: "看门狗只在验证各关键子系统本周期都有进展后才喂狗，不在定时器 ISR 中无条件喂狗"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax]
     ref: references/rtos/mcu-isr-rtos.md §5
@@ -732,7 +741,7 @@ rules:
   - id: DMA-001
     title: "有 D-cache 时 DMA 缓冲区按 cache line 对齐，发送前 clean、接收后 invalidate，或放在 non-cacheable 区"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax]
     ref: [references/rtos/mcu-isr-rtos.md §5, references/cpp/coding.md §7]
@@ -744,7 +753,7 @@ rules:
   - id: DMA-002
     title: "DMA 完成中断只通知任务，数据处理在任务中；缓冲区生命周期覆盖整个传输"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax]
     ref: references/rtos/mcu-isr-rtos.md §5
@@ -755,7 +764,7 @@ rules:
   - id: CPP-001
     title: "T0–T2 构建使用 -fno-exceptions -fno-rtti -fno-use-cxa-atexit，链接产物中不出现异常与 RTTI 运行时"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [pigweed, measured]
     ref: [references/cpp/coding.md §2, references/cpp/features.md §3]
@@ -770,7 +779,7 @@ rules:
   - id: CPP-002
     title: "T0–T2 链接产物中不出现 RTTI 类型信息"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [pigweed, measured]
     ref: references/cpp/features.md §3
@@ -783,7 +792,7 @@ rules:
   - id: CPP-003
     title: "堆：T0 禁止；T1 仅初始化期并随后锁定；T2 注入分配器或池；ISR 与 RT 路径禁止"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [pigweed, core-guidelines]
     ref: [references/cpp/coding.md §6, references/cpp/features.md §2]
@@ -799,7 +808,7 @@ rules:
   - id: CPP-004
     title: "T0–T2 不用 std::function，用 etl::delegate / etl::inplace_function / pw::Function"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [pigweed, etl, measured]
     ref: references/cpp/features.md §3
@@ -814,7 +823,7 @@ rules:
   - id: CPP-005
     title: "T0–T2 不用会分配的标准容器（vector/string/map/list/deque/unordered_*），用 ETL 固定容量容器"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [etl, measured]
     ref: references/cpp/features.md §3
@@ -829,7 +838,7 @@ rules:
   - id: CPP-006
     title: "T0–T2 不用 iostream"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [pigweed, measured]
     ref: references/cpp/features.md §3
@@ -843,7 +852,7 @@ rules:
   - id: CPP-007
     title: "printf 族：T0 禁止，T1/T2 只在非 RT 路径使用"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [pigweed, measured]
     ref: references/cpp/features.md §3
@@ -858,7 +867,7 @@ rules:
   - id: CPP-008
     title: "ISR/线程共享的原子类型写 static_assert(is_always_lock_free)；ARMv6-M 上的 RMW 与 32 位 MCU 上的 64 位原子改用临界区"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [measured, core-guidelines]
     ref: [references/cpp/coding.md §7, references/cpp/features.md §3]
@@ -872,7 +881,7 @@ rules:
   - id: CPP-009
     title: "函数局部静态的动态初始化：T0 禁止；T1/T2 仅在调度器启动前或单线程上下文首次触达（T2 亦可提供 RTOS 感知 guard），绝不在 ISR 中首次触达"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [core-guidelines, measured]
     ref: [references/cpp/coding.md §6, references/cpp/features.md §2]
@@ -887,7 +896,7 @@ rules:
   - id: CPP-010
     title: "全局与静态对象构造函数不访问硬件、RTOS 或日志；硬件在时钟与总线就绪后经显式 init() 初始化"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [core-guidelines, pigweed]
     ref: [references/cpp/coding.md §4, references/cpp/coding.md §6]
@@ -897,7 +906,7 @@ rules:
   - id: CPP-020
     title: "全局对象尽量用 constinit（C++20）或 constexpr 构造（C++17），使其进入 .data/.bss 并消除跨编译单元初始化顺序问题"
     level: advisory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [core-guidelines, pigweed]
     ref: references/cpp/coding.md §6
@@ -906,7 +915,7 @@ rules:
   - id: CPP-011
     title: "多态基类用受保护非虚析构 + final 实现；virtual 只用于运行期选择的边界"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [core-guidelines, measured]
     ref: [references/cpp/features.md §3, references/cpp/patterns.md §3]
@@ -917,7 +926,7 @@ rules:
   - id: CPP-012
     title: "volatile 只用于 MMIO 与 DMA 描述符；不使用 volatile 复合运算（C++20 已弃用）"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace, esp-idf]
     lang: [cpp]
     source: [core-guidelines]
     ref: [references/cpp/coding.md §7, references/cpp/features.md §3]
@@ -930,7 +939,7 @@ rules:
   - id: CPP-013
     title: "ISR 向量 extern \"C\" 且名字与启动文件一致；C 回调用 noexcept 静态蹦床；跨边界类型为标准布局"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [core-guidelines, pigweed]
     ref: [references/cpp/coding.md §8, references/cpp/patterns.md §7]
@@ -940,7 +949,7 @@ rules:
   - id: CPP-014
     title: "SDK 错误码在 bsp 层映射为 Status/Result，返回值 [[nodiscard]] 且被检查"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace, esp-idf]
     lang: [cpp]
     source: [core-guidelines, pigweed]
     ref: [references/cpp/coding.md §5, references/cpp/coding.md §8]
@@ -950,7 +959,7 @@ rules:
   - id: CPP-015
     title: "自有代码使用严格告警组并 -Werror；第三方头（ETL、CMSIS、厂商 SDK、RTOS）用 -isystem 引入"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace, esp-idf]
     lang: [cpp]
     source: [pigweed]
     ref: references/cpp/coding.md §2
@@ -973,7 +982,7 @@ rules:
   - id: CPP-017
     title: "不用位域映射寄存器，用掩码与移位常量或类型安全寄存器"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [core-guidelines, modm]
     ref: references/cpp/features.md §3
@@ -1333,7 +1342,7 @@ rules:
   - id: TEST-002
     title: "新增或修改的 C 公共函数有测试：正常路径、参数错误、依赖错误、边界"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [c]
     source: [skill]
     ref: references/verification/ceedling.md §5
@@ -1344,7 +1353,7 @@ rules:
   - id: TEST-006
     title: "新增或修改的 C++ 公共函数与类方法有测试：正常路径、参数错误、依赖错误、边界"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, linux-userspace, esp-idf]
     lang: [cpp]
     source: [skill]
     ref: [references/verification/ceedling.md §5, references/verification/cpp-testing.md §2]
@@ -1364,7 +1373,7 @@ rules:
   - id: TEST-004
     title: "目标构建可用时报告 Flash/RAM 余量变化；C++ 改动给出与基线 ELF 的 cpp_cost diff"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [c, cpp]
     source: [skill, measured]
     ref: references/verification/cpp-testing.md §6
@@ -1418,7 +1427,7 @@ rules:
   - id: ERR-001
     title: "断言只用于程序员错误；外部输入、硬件错误与超时返回错误码；发布构建中断言失败进入安全态而不是继续运行"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, linux-userspace, esp-idf]
     lang: [c, cpp]
     source: [skill, core-guidelines]
     ref: references/architecture/state-protocol-fault.md §4
@@ -1428,7 +1437,7 @@ rules:
   - id: FAULT-001
     title: "启动时记录复位原因；fault handler 与断言失败把现场写入 no-init RAM 或预留 Flash，并在下次启动时上报"
     level: advisory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [c, cpp]
     source: [skill, arm]
     ref: [references/architecture/state-protocol-fault.md §6, references/verification/debugging.md §5]
@@ -1438,7 +1447,7 @@ rules:
   - id: DBG-001
     title: "调试器的 halt、reset、flash 与 option bytes 操作属于硬件动作：halt 正在控制执行器的目标同样需要授权"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [c, cpp]
     source: [skill]
     ref: [references/verification/debugging.md §1, SKILL.md §0]
@@ -1449,7 +1458,7 @@ rules:
   - id: BOOT-001
     title: "每次启动在跳转前校验镜像哈希（量产设备校验签名）；校验失败不跳转"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [c, cpp]
     source: [mcuboot]
     ref: references/architecture/boot-update.md §2
@@ -1460,7 +1469,7 @@ rules:
   - id: BOOT-002
     title: "升级过程中任意时刻掉电都可恢复；新镜像经自检确认，未确认即复位时回滚"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [c, cpp]
     source: [mcuboot]
     ref: references/architecture/boot-update.md §3
@@ -1472,7 +1481,7 @@ rules:
   - id: BOOT-003
     title: "防回滚：镜像携带单调安全计数器，bootloader 拒绝低于已记录值的镜像"
     level: advisory
-    profiles: [mcu-baremetal, mcu-rtos, zephyr]
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [c, cpp]
     source: [mcuboot]
     ref: references/architecture/boot-update.md §2
@@ -1484,7 +1493,7 @@ rules:
   - id: RV-001
     title: "RISC-V 目标不含 A 扩展时原子读-改-写改用临界区；MMIO 与 DMA 描述符的访问顺序用 fence 保证"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos]
+    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [riscv]
     ref: references/platforms/riscv.md §3
@@ -1516,3 +1525,105 @@ rules:
     when: "RTOS 为 ThreadX，或在 FreeRTOS 与 ThreadX 之间移植"
     verify:
       method: review
+
+  # ------------------------------------------------------------------ ESP-IDF（v6.x，Xtensa 与 RISC-V 目标）
+  - id: ESP-001
+    title: "SMP 临界区用 portMUX_TYPE 自旋锁与 taskENTER_CRITICAL(&mux)/taskENTER_CRITICAL_ISR(&mux)；不以 taskDISABLE_INTERRUPTS 或 vTaskSuspendAll 作互斥，临界区内不调用阻塞或 FreeRTOS API"
+    level: mandatory
+    profiles: [esp-idf]
+    lang: [c, cpp]
+    source: [esp-idf]
+    ref: references/platforms/esp-idf.md §3
+    verify:
+      method: review
+
+  - id: ESP-002
+    title: "Flash cache 关闭期间须运行的中断用 ESP_INTR_FLAG_IRAM 注册，处理函数及调用链 IRAM_ATTR、所用数据 DRAM_ATTR，ISR 日志用 ESP_DRAM_LOG*"
+    level: mandatory
+    profiles: [esp-idf]
+    lang: [c, cpp]
+    source: [esp-idf]
+    ref: references/platforms/esp-idf.md §4
+    verify:
+      method: review
+    cost: "占用有限的 IRAM；只放确有低延迟需求的路径，并报告 idf.py size 变化"
+
+  - id: ESP-003
+    title: "IDF FreeRTOS 任务栈深度以字节计；时序敏感任务显式选择核亲和性（xTaskCreatePinnedToCore）并说明理由，单核目标有降级方案"
+    level: mandatory
+    profiles: [esp-idf]
+    lang: [c, cpp]
+    source: [esp-idf]
+    ref: [references/platforms/esp-idf.md §3, references/platforms/esp-idf.md §6]
+    verify:
+      method: review
+
+  - id: ESP-004
+    title: "检查每个 esp_err_t：可恢复错误经 ESP_RETURN_ON_ERROR 等传播，ESP_ERROR_CHECK 只用于不可恢复的程序错误；assert 表达式无副作用"
+    level: mandatory
+    profiles: [esp-idf]
+    lang: [c, cpp]
+    source: [esp-idf]
+    ref: references/platforms/esp-idf.md §5
+    verify:
+      method: review
+
+  - id: ESP-005
+    title: "烧写 eFuse、启用 Secure Boot / Flash Encryption、禁用 JTAG 或下载模式属于不可逆硬件动作：型号、版本或密钥方案未知时不给可直接执行的命令，先在 Development 模式或 QEMU 验证，执行前取得接受后果的明确授权"
+    level: mandatory
+    profiles: [esp-idf]
+    lang: [c, cpp]
+    source: [esp-idf, skill]
+    ref: [references/platforms/esp-idf.md §7, references/verification/debugging.md §1]
+    verify:
+      method: review
+
+  - id: ESP-006
+    title: "ESP-IDF 组件按 ESP-IDF Style Guide：4 空格、函数定义花括号换行、行宽 120、静态变量 s_ 前缀、公共符号组件前缀、头文件 #pragma once 与 extern \"C\"，Astyle 格式化"
+    level: mandatory
+    profiles: [esp-idf]
+    lang: [c]
+    source: [esp-idf]
+    ref: [references/platforms/esp-idf.md §2, references/profiles.md §3]
+    verify:
+      method: auto
+      tool: idf_astyle
+      coverage: partial
+      gap: "Astyle 只管格式；命名前缀、static 与 s_ 前缀、extern \"C\" 需 review；项目未配置 pre-commit 时只能 review"
+    conflicts: [C-016]
+
+  - id: ESP-007
+    title: "OTA 使用至少两个 OTA 分区与 otadata，启用 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE；新镜像自检通过后 esp_ota_mark_app_valid_cancel_rollback，失败 esp_ota_mark_app_invalid_rollback_and_reboot"
+    level: mandatory
+    profiles: [esp-idf]
+    lang: [c, cpp]
+    source: [esp-idf]
+    ref: references/platforms/esp-idf.md §7
+    verify:
+      method: test
+
+  - id: ESP-008
+    title: "组件代码同时兼容 Xtensa 与 RISC-V 目标：芯片差异用 CONFIG_IDF_TARGET_* / SOC_* 能力宏与 esp_cpu、esp_intr_alloc 抽象，架构专属代码隔离在按架构区分的文件；CI 至少各构建一个目标"
+    level: mandatory
+    profiles: [esp-idf]
+    lang: [c, cpp]
+    source: [esp-idf]
+    ref: [references/platforms/esp-idf.md §6, references/platforms/esp-idf.md §8]
+    verify:
+      method: auto
+      tool: idf_build
+      coverage: partial
+      gap: "双目标构建只能发现编译期不兼容；核数、对齐、原子宽度等运行期差异需 review 与目标测试"
+
+  - id: ESP-009
+    title: "按仓库锁定的 IDF 版本使用 API；v6 工程不使用已移除的 legacy 驱动与头文件，不以关闭默认 -Werror 代替修复告警"
+    level: advisory
+    profiles: [esp-idf]
+    lang: [c, cpp]
+    source: [esp-idf]
+    ref: references/platforms/esp-idf.md §9
+    verify:
+      method: auto
+      tool: idf_build
+      coverage: partial
+      gap: "构建能发现已移除的头文件与 API；行为变化（如 esp_wifi_init 重复初始化返回错误、DHCP 不再下发 DNS）需 review"

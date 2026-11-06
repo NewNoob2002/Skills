@@ -136,6 +136,21 @@ class DetectProfileTest(unittest.TestCase):
             write(tmp, "west.yml", "manifest: {}\n")
             self.assertEqual(self.detect(tmp)["suggested"], "zephyr")
 
+    def test_esp_idf_beats_rtos_evidence(self):
+        # ESP-IDF 工程自带 FreeRTOSConfig.h 与 xtensa/riscv 工具链字样，不能被判成通用 mcu-rtos
+        with tempfile.TemporaryDirectory() as tmp:
+            write(tmp, "CMakeLists.txt",
+                  "cmake_minimum_required(VERSION 3.22)\ninclude($ENV{IDF_PATH}/tools/cmake/project.cmake)\n"
+                  "project(app)\n")
+            write(tmp, "main/CMakeLists.txt", 'idf_component_register(SRCS "main.c" INCLUDE_DIRS ".")\n')
+            write(tmp, "main/idf_component.yml", "dependencies:\n  idf: '>=6.0'\n")
+            write(tmp, "sdkconfig.defaults", "CONFIG_IDF_TARGET=\"esp32s31\"\n")
+            write(tmp, "partitions.csv", "nvs, data, nvs, , 0x6000\n")
+            write(tmp, "components/osal/include/FreeRTOSConfig.h")
+            write(tmp, "cmake/toolchain.cmake", "set(CMAKE_C_COMPILER xtensa-esp32-elf-gcc)\n")
+            report = self.detect(tmp)
+            self.assertEqual(report["suggested"], "esp-idf")
+
     def test_freertos_beats_baremetal(self):
         with tempfile.TemporaryDirectory() as tmp:
             write(tmp, "platform/stm32g4/startup/startup_stm32g474xx.s")
