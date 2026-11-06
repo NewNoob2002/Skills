@@ -4,7 +4,7 @@
 
 ## 1. 版本与目标
 
-- **IDF 版本**：v6.0 于 2026-03-19 发布，维护期至 2028-09；v6.1 为当前次版本。先从仓库确认版本（`idf.py --version`、`dependencies.lock` 的 `idf` 条目、CI 镜像标签），不要假设。v5.x 工程迁移见 §9。
+- **IDF 版本**：v6.0 于 2026-03 发布（tag 2026-03-19，Release 2026-03-20），维护期 30 个月至 2028-09；v6.1 为当前次版本。先从仓库确认版本（`idf.py --version`、`dependencies.lock` 的 `idf` 条目、CI 镜像标签），不要假设。v5.x 工程迁移见 §9。
 - **架构**：同一份组件代码可能编译到两种 CPU 架构，必须同时考虑：
 
 | 目标 | CPU | 说明 |
@@ -25,7 +25,7 @@
 
 ## 3. FreeRTOS（IDF SMP 版本）与并发
 
-IDF 的 FreeRTOS 基于 Vanilla v10.5.1 并加入 SMP 支持，与原版有几处会导致错误代码的差异：
+IDF 默认的 FreeRTOS 基于 Vanilla v10.5.1 并加入 SMP 支持（实验性的 `CONFIG_FREERTOS_SMP` 仅限 `esp32`，会改用 Amazon SMP 内核 V11.1.0，细节按该内核核对），与原版有几处会导致错误代码的差异：
 
 - **临界区是自旋锁**（`ESP-001`）：用 `portMUX_TYPE` 定义（静态初始化 `portMUX_INITIALIZER_UNLOCKED`，动态 `portMUX_INITIALIZE()`），任务中 `taskENTER_CRITICAL(&mux)` / `taskEXIT_CRITICAL(&mux)`，ISR 中 `taskENTER_CRITICAL_ISR(&mux)` / `taskEXIT_CRITICAL_ISR(&mux)`。临界区要短，不在其中调用 FreeRTOS API 或任何会阻塞、让出的函数；嵌套须配对，交叉使用不同自旋锁可能死锁。
 - `taskDISABLE_INTERRUPTS()` 只作用于当前核，**不能**作为 SMP 互斥手段；`vTaskSuspendAll()` 只暂停调用核的调度，另一核上未绑核的任务照常运行，同样不是互斥手段（在 Core 0 上调用还会冻结 tick，拖慢全系统计时）。
@@ -46,7 +46,7 @@ IDF 的 FreeRTOS 基于 Vanilla v10.5.1 并加入 SMP 支持，与原版有几�
 
 ## 5. 错误处理、日志与看门狗
 
-- 所有返回 `esp_err_t` 的调用都检查（`ESP-004`）。可恢复错误（外部输入、总线 NACK、超时、资源不足）返回给调用者：用 `esp_check.h` 的 `ESP_RETURN_ON_ERROR` / `ESP_GOTO_ON_ERROR` 等宏传播并附带日志。`ESP_ERROR_CHECK()` 只用于“失败即为程序错误、继续运行无意义”的场合，它在失败时会中止。
+- 所有返回 `esp_err_t` 的调用都检查（`ESP-004`）。可恢复错误（外部输入、总线 NACK、超时、资源不足）返回给调用者：用 `esp_check.h` 的 `ESP_RETURN_ON_ERROR` / `ESP_GOTO_ON_ERROR` 等宏传播并附带日志。`ESP_ERROR_CHECK()` 只用于“失败即为程序错误、继续运行无意义”的场合，它在失败时会中止；但定义了 `NDEBUG`（断言被禁用）时它只求值、**不检查也不中止**，错误被静默丢弃（`esp_err.h`），因此不能用它处理发布构建中仍可能发生的错误。返回 `esp_err_t` 的调用也不要用 `(void)` 丢弃结果（如 `esp_ota_mark_app_valid_cancel_rollback()` 失败意味着下次复位会回滚），至少记录日志。
 - v6 注意：`esp_wifi_init()` 在已初始化时返回错误，包在 `ESP_ERROR_CHECK` 中会导致重复初始化的路径直接中止；I2C master 收到 NACK 返回 `ESP_ERR_INVALID_RESPONSE`。
 - `assert()` 只用于内部逻辑错误；断言可被配置关闭，表达式不能有副作用（v6 中 `COMPILER_ASSERT_NDEBUG_EVALUATE` 默认 `n`，`NDEBUG` 下断言表达式不再求值）（`ERR-001`）。
 - 日志用 `ESP_LOGx(TAG, …)`，每个组件一个 `TAG`；不在 ISR 或临界区中调用普通日志。
@@ -61,7 +61,7 @@ IDF 的 FreeRTOS 基于 Vanilla v10.5.1 并加入 SMP 支持，与原版有几�
 - 不假设非对齐访问、原子宽度或 cache 行大小跨目标一致；按 TRM 与 `SOC_*` 宏确认（`PROTO-002`、`DMA-001`）。
 - **故障分析**（panic 输出以 “Guru Meditation Error” 开头）：
   - Xtensa：看 `PC`、`EXCCAUSE`、`EXCVADDR`（异常类型如 `LoadProhibited`、`StoreProhibited`、`IllegalInstruction`）。
-  - RISC-V：看 `MEPC`、`MCAUSE`、`MTVAL`、`RA`、`SP`（异常类型如 “Illegal instruction”、“Load Access Fault”、“Store Access Fault”、“Load/Store Address Misaligned”）；访问类故障的出错地址在 `MTVAL`。
+  - RISC-V：看 `MEPC`、`MCAUSE`、`MTVAL`、`RA`、`SP`（异常原因串区分大小写，如 “Illegal instruction”、“Instruction access fault”、“Load access fault”、“Store access fault”、“Load address misaligned”、“Store address misaligned”）；访问类故障的出错地址在 `MTVAL`。
   - “Cache error” 或 Flash 中代码引起的 Illegal Instruction，优先怀疑 §4 的 IRAM/cache 问题。
   - 用 `idf.py monitor` 的地址解码或 `riscv32-esp-elf-addr2line` / `xtensa-esp32-elf-addr2line`（按目标）配合 ELF 定位；需要完整现场时启用 core dump（存 Flash 或 UART），连接 JTAG 且开启 OCD 感知模式时 core dump 会跳过。
   - panic 行为由 `CONFIG_ESP_SYSTEM_PANIC_*` 选择（默认打印后重启；`PRINT_HALT` 会停住，正在驱动执行器的设备不要用，见 `DBG-001`）。
@@ -73,17 +73,17 @@ IDF 的 FreeRTOS 基于 Vanilla v10.5.1 并加入 SMP 支持，与原版有几�
 - **回滚**（`ESP-007`）：启用 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`。新镜像首次启动处于 `ESP_OTA_IMG_PENDING_VERIFY`，自检通过后调用 `esp_ota_mark_app_valid_cancel_rollback()`，失败调用 `esp_ota_mark_app_invalid_rollback_and_reboot()`；两者都不调用就复位会回滚。新镜像只有一次启动机会，自检要尽早完成，避免掉电被误判为失败。factory 分区不参与回滚。
 - **防回滚**：`CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK` 把安全版本写入 eFuse，镜像版本低于 eFuse 记录值时拒绝启动；eFuse 位数有限（ESP32 上最多 32 次），发布流程要规划版本号的使用（`BOOT-003`）。
 - **不可逆硬件动作**（`ESP-005`，同 `GEN-001`）：烧写 eFuse（包括密钥、安全版本、JTAG/下载模式禁用）、启用 Secure Boot、启用 Flash Encryption 都不能撤销或只能有限次撤销：
-  - Flash Encryption 密钥写入 eFuse“只能进行一次”；Release 模式下不能再串口烧写明文固件，只能经 OTA 更新；Development 模式下每颗芯片最多关闭加密 3 次。误启用加密后烧写明文数据会使芯片软变砖。
+  - 传统 eFuse key block 方案中 Flash Encryption 密钥写入 eFuse“只能进行一次”（支持 Key Manager 的目标如 `esp32c5`/`esp32p4` 按该目标安全文档核对密钥部署方式）；Release 模式下 UART 下载模式不再执行加密，明文固件只能经 OTA 写入，持有同一密钥副本时才能在主机预加密后经串口烧写密文；Development 模式下每颗芯片最多关闭加密 3 次。误启用加密后烧写明文数据会使芯片软变砖。
   - 禁用 ROM 下载模式后 `esptool` 无法再连接芯片。
   - 处理流程：先确认完整芯片型号与版本（含 ECO 版本）、IDF 版本、密钥保管与产线流程；先在 Development 模式或 QEMU 中验证；给出命令时说明后果，并要求用户在执行前确认具体设备并接受不可逆后果。型号、版本或密钥方案未知时不写可直接执行的 eFuse/安全启用命令。v6 中 `idf.py` 的 eFuse 命令需要显式指定端口。
-- v6 的 TLS/密码学基于 MbedTLS 4.x，以 PSA Crypto API 为主；在正常启动流程之前运行的代码需要自行调用 `psa_crypto_init()`。
+- v6 的 TLS/密码学基于 MbedTLS 4.x（v6.1 为 4.1.0），以 PSA Crypto API 为主；在正常启动流程之前运行的代码需要自行调用 `psa_crypto_init()`。
 
 ## 8. 测试与验证
 
-- **单元测试**：组件测试用 IDF 集成的 Unity，放在 `test_apps/` 中构建为测试应用；纯逻辑部分可在 host 上测试（IDF 的 `linux` 目标，或把不依赖 IDF 的代码交给 Ceedling / CppUTest）。测试 oracle 来自接口与需求（`GEN-006`、`TEST-002`）。
+- **单元测试**：组件测试用 IDF 集成的 Unity，放在 `test_apps/` 中构建为测试应用；纯逻辑部分可在 host 上测试（IDF 的 `linux` 目标——属 preview，仅适合不依赖硬件的逻辑，或把不依赖 IDF 的代码交给 Ceedling / CppUTest）。测试 oracle 来自接口与需求（`GEN-006`、`TEST-002`）。
 - **目标测试**：`pytest-embedded` 驱动测试应用在开发板上运行；没有开发板时记 `NOT_RUN`。QEMU 可用于部分目标（以官方 QEMU 指南支持列表为准），仿真通过不等于硬件通过（`GEN-003`）。
 - **构建门禁**：`idf.py set-target <target>` 后 `idf.py build`（v6 默认告警即错误）；`idf.py size` / `size-components` 报告 Flash、IRAM、DRAM 变化（`TEST-004`）。两种架构都要编译：至少构建一个 Xtensa 目标（如 `esp32`）和一个 RISC-V 目标（如 `esp32s31`，注意其 preview 状态）。
-- **格式**：`pre-commit run --files <files> astyle_py`（项目已配置时）。
+- **格式**：`pre-commit run astyle_py --files <files>`（项目已配置时）。
 - 烧录与监视（`idf.py flash monitor`）是硬件动作，需要授权（`GEN-001`、`DBG-001`）。
 
 ## 9. 从 v5.x 迁移到 v6.x 的要点
@@ -94,11 +94,11 @@ IDF 的 FreeRTOS 基于 Vanilla v10.5.1 并加入 SMP 支持，与原版有几�
 - 头文件移除：`intr_types.h`（改用 `esp_intr_types.h`）、`esp_spi_flash.h`、`esp_spiram.h`、`esp_interface.h`、lwIP `ping.h` / `esp_ping.h`；`esp_dma_capable_malloc`/`calloc` 已移除；`esp_log_buffer_hex` 改用 `ESP_LOG_BUFFER_HEX`。
 - 迁出核心、改为组件管理器组件：wifi_provisioning（改为 network_provisioning）、esp-mqtt、cJSON、USB Host、gcov（esp-gcov）及部分以太网/LCD 驱动；需要在 `idf_component.yml` 中声明。
 - MbedTLS 4.x：大量旧 `mbedtls_*` API 被移除，去除无前向保密的 DHE/RSA 密钥交换与 250 位以下曲线。
-- DHCP 服务器不再自动下发 DNS，需要 `esp_netif_dhcps_option()` 与 `esp_netif_set_dns_info()`。
+- DHCP 服务器不再自动把已配置的 DNS 放进 offer：需用 `esp_netif_dhcps_option()` 显式启用 `ESP_NETIF_DOMAIN_NAME_SERVER` 并用 `esp_netif_set_dns_info()` 设置地址；未启用时客户端拿到的 DNS 是 AP 自身 IP。
 - 默认告警即错误、默认 Picolibc、`gnu23` / `gnu++26`：先在 CI 中开启这些默认值修正告警，不要以关闭 `-Werror` 代替修复。
 
 ## 来源
 
 - ESP-IDF Programming Guide v6.1：[FreeRTOS (IDF)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/freertos_idf.html)、[Flash 并发约束](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/spi_flash/spi_flash_concurrency.html)、[Fatal Errors（RISC-V 目标页）](https://docs.espressif.com/projects/esp-idf/en/stable/esp32c6/api-guides/fatal-errors.html)、[Style Guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/contribute/style-guide.html)、[OTA](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/ota.html)、[Flash Encryption](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/security/flash-encryption.html)、[Security Overview](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/security/security.html)。
 - [ESP-IDF v6.0 发布说明](https://github.com/espressif/esp-idf/releases/tag/v6.0)，[ESP32-S31 产品页](https://www.espressif.com/en/products/socs/esp32-s31)；S31 的 preview 状态与 esptool 要求见 [platform-espressif32 #1777](https://github.com/platformio/platform-espressif32/issues/1777)。
-- 未逐条核对原文的点：Xtensa panic 寄存器名称（本次只核对了 RISC-V 目标页）、Xtensa 高优先级中断需汇编实现、`esp_check.h` 宏名、QEMU 支持的目标列表、IDF `linux` 目标的组件支持范围。使用前对照对应目标的 v6.x 文档。
+- 2026-11-06 另对照 ESP-IDF v6.1 源码（`fff9895c`）核对了 Xtensa/RISC-V panic 原因串、`esp_check.h` 宏名、Xtensa 高优先级中断、QEMU 目标（esp32/esp32c3/esp32s3）与 `linux` preview 状态。仍未核对：IDF `linux` 目标的组件支持范围。

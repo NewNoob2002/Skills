@@ -1,0 +1,59 @@
+# 验证工程：ESP-IDF v6.1 应用（esp32 = Xtensa，esp32s31 = RISC-V，后者在 v6.1 中为 preview 目标）
+# 双目标构建（v6 默认告警即错误）、ELF 符号表确认 ISR 位于 IRAM、linux 目标上的 Unity host 测试。
+# 没有开发板与 QEMU：上板运行（pytest-embedded）不在本工程内，ISR 的 IRAM 行为只做静态确认。
+# 预期结果在运行前写定（2026-11-06）。
+project: esp-idf-app
+profile: esp-idf
+summary: "帧解析组件（host 可测）+ GPIO 事件计数组件（IRAM ISR、portMUX 自旋锁、ESP_RETURN_ON_ERROR）+ OTA 回滚确认的应用；分别为 esp32 与 esp32s31 构建。"
+checks:
+  build_esp32:
+    run: ". {idf_path}/export.sh >/dev/null 2>&1 && idf.py -B build-esp32 -D SDKCONFIG=build-esp32/sdkconfig set-target esp32 build"
+    requires: ["{idf_path}/export.sh"]
+    timeout: 1800
+    rules: [ESP-008, ESP-009]
+  build_esp32s31:
+    run: ". {idf_path}/export.sh >/dev/null 2>&1 && idf.py --preview -B build-esp32s31 -D SDKCONFIG=build-esp32s31/sdkconfig set-target esp32s31 build"
+    requires: ["{idf_path}/export.sh"]
+    timeout: 1800
+    rules: [ESP-008, ESP-009]
+  iram_esp32:
+    run: ". {idf_path}/export.sh >/dev/null 2>&1 && xtensa-esp32-elf-objdump -t build-esp32/esp_idf_app.elf | grep -E ' event_counter_isr$' | grep -q '[.]iram0[.]text'"
+    requires: ["{idf_path}/export.sh"]
+    needs: [build_esp32]
+    rules: [ESP-002]
+  iram_esp32s31:
+    run: ". {idf_path}/export.sh >/dev/null 2>&1 && riscv32-esp-elf-objdump -t build-esp32s31/esp_idf_app.elf | grep -E ' event_counter_isr$' | grep -q '[.]iram0[.]text'"
+    requires: ["{idf_path}/export.sh"]
+    needs: [build_esp32s31]
+    rules: [ESP-002]
+  host_test:
+    run: ". {idf_path}/export.sh >/dev/null 2>&1 && cd host_test && idf.py --preview -B build set-target linux build && ./build/frame_parser_host_test.elf"
+    requires: ["{idf_path}/export.sh"]
+    timeout: 1200
+    rules: [PROTO-001, TEST-002]
+variants:
+  good: {}
+  bad-no-iram:
+    violates: [ESP-002]
+    note: "ISR 去掉 IRAM_ATTR，但仍以 ESP_INTR_FLAG_IRAM 注册：两种架构的构建都通过，ISR 落在 .flash.text"
+    expect: {iram_esp32: FAIL, iram_esp32s31: FAIL}
+  bad-xtensa-only:
+    violates: [ESP-008]
+    note: "共享组件直接包含 xt_utils.h 并调用 xt_utils_get_cycle_count()：Xtensa 目标构建通过，RISC-V 目标找不到头文件"
+    expect: {build_esp32s31: FAIL, iram_esp32s31: BLOCKED}
+  bad-legacy-driver:
+    violates: [ESP-009]
+    note: "包含 v6 已移除的 legacy 驱动头 driver/timer.h：两个目标都编译失败"
+    expect: {build_esp32: FAIL, build_esp32s31: FAIL, iram_esp32: BLOCKED, iram_esp32s31: BLOCKED}
+  bad-no-length-check:
+    violates: [PROTO-001]
+    note: "长度字段不与上限比较：超长帧用例期望 ESP_ERR_INVALID_SIZE，实际越界拷贝"
+    expect: {host_test: FAIL}
+  bad-disable-interrupts:
+    violates: [ESP-001]
+    note: "用 taskDISABLE_INTERRUPTS 代替 portMUX 自旋锁，ISR 侧不加锁"
+    known_gap: "ESP-001 是 review 规则：taskDISABLE_INTERRUPTS 只屏蔽当前核，构建与 host 测试都无法发现跨核竞争；需要双核目标上的压力测试或代码审查"
+  bad-error-check-abort:
+    violates: [ESP-004]
+    note: "可恢复的 GPIO 驱动错误用 ESP_ERROR_CHECK 中止，而不是返回给调用者"
+    known_gap: "ESP-004 是 review 规则：两种用法都能编译，host 测试不覆盖该组件，错误路径只能在审查或故障注入中发现"

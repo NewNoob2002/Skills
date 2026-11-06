@@ -275,11 +275,15 @@ DeepSeek high 与 Gemini high 在只含 `skills/` 的快照上回答七项原提
 
 新增 `esp-idf` profile，覆盖 ESP-IDF v6.x，以及 Xtensa（ESP32）与 RISC-V（ESP32-S31）两类目标：
 
-- `references/platforms/esp-idf.md`：版本与目标、组件与 Style Guide、IDF SMP FreeRTOS、IRAM/Flash cache、错误处理与看门狗、Xtensa/RISC-V 兼容与故障分析、OTA 回滚与不可逆安全操作、测试、v5→v6 迁移。所列 API 与配置项已对照 ESP-IDF Programming Guide v6.1 核实；未逐条核对的点列在该文末尾。
+- `references/platforms/esp-idf.md`：版本与目标、组件与 Style Guide、IDF SMP FreeRTOS、IRAM/Flash cache、错误处理与看门狗、Xtensa/RISC-V 兼容与故障分析、OTA 回滚与不可逆安全操作、测试、v5→v6 迁移。所列 API 与配置项已对照 ESP-IDF Programming Guide v6.1 核实，并经独立事实核查（见下文）；仍未核对的点列在该文末尾。
 - ESP32-S31 在 IDF v6.1 中是 **preview** 目标（`IDF_ENV_BRINGUP`），参考文档中已注明，不按量产级支持处理。
 - `standards/rules.yaml`：新增 `ESP-001`–`ESP-009`；`esp-idf` 复用 54 条现有规则（ISR、RTOS、DMA、C++、BOOT、ERR、FAULT、DBG、RV 等）。BARR-C 格式/命名层与 `ARCH-001`–`ARCH-006` 分层规则不适用；`C-016` 与 `ESP-006`（`#pragma once`）的冲突已双向登记。
 - `scripts/detect_profile.py`：按 `project.cmake`、`idf_component_register`、`sdkconfig*`、`idf_component.yml`/`dependencies.lock`、分区表识别，新增 1 项测试（含 FreeRTOSConfig.h 与 xtensa 工具链干扰时仍判为 `esp-idf`）。
-- 新增 `idf_build`、`idf_astyle`、`idf_pytest` 三个外部门禁工具。本机没有安装 ESP-IDF，**三者均未实际运行（NOT_RUN）**；也没有 ESP-IDF 验证工程或开发板。
+- 新增 `idf_build`、`idf_astyle`、`idf_pytest` 三个外部门禁工具。本机已安装 ESP-IDF v6.1（`~/esp/esp-idf`，`fff9895c`；`run_evals.py` 的 `idf_path` 占位符可用 `IDF_PATH` 覆盖），新增验证工程 `evals/projects/esp-idf-app`（帧解析 host 测试 + IRAM ISR/portMUX 组件 + OTA 回滚确认，分别构建 esp32 与 esp32s31）：7 个变体全部 MATCH；`bad-disable-interrupts`（ESP-001）与 `bad-error-check-abort`（ESP-004）为 review 规则，已登记为已知漏报。仍没有开发板，`idf_pytest` 目标测试与烧录未运行。
+
+**独立事实核查**：由 DeepSeek-V4.1-Flash（omp，只读）对照本机 v6.1 源码与在线文档逐条核对 `esp-idf.md`，报告错误 3、存疑 6、正确 30+。据此修正：Release 模式 Flash Encryption 可经主机预加密后串口烧写密文（原文“只能经 OTA 更新”过强）；“密钥只能写入一次”限定于传统 eFuse key block 方案（Key Manager 目标另行核对）；`pre-commit run astyle_py --files <files>` 参数顺序；RISC-V panic 原因串改为源码中的原样大小写并拆分 load/store misaligned；补充实验性 `CONFIG_FREERTOS_SMP`（仅 esp32，V11.1.0 内核）；DHCP DNS 行为精确化（未启用 `ESP_NETIF_DOMAIN_NAME_SERVER` 时下发 AP 自身 IP）；`linux` 目标标注为 preview；MbedTLS 版本写明 4.1.0；v6.0 发布日注明 tag/Release 日期；文末“未核对”清单删除已核实项。
+
+**回归（修正后）**：`validate_skill.py` 31 PASS / 0 FAIL；`pytest tests` 227 passed、2 skipped；`run_evals.py --strict` 50 MATCH、0 MISMATCH、0 NOT_RUN（含 esp-idf-app 7 个变体）。Agent 行为评测（下表）未在修正后重跑。
 
 Agent 行为（新增 E01 cache/IRAM 中断、E02 eFuse/Flash Encryption 护栏、E03 SMP 临界区，各 3 次，同一批同时运行；Claude `claude-opus-5-5`，Codex `codex/gpt-6.1-sol` low，评委 DeepSeek high）：结果见 [RESULTS-espidf.md](../evals/agent/RESULTS-espidf.md)。
 

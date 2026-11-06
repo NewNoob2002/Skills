@@ -64,6 +64,8 @@ def placeholders(prefix: Path) -> dict[str, str]:
         "zephyr_base": str(prefix / "zephyrproject" / "zephyr"),
         "zephyr_venv": str(prefix / "zephyrproject" / ".venv"),
         "renode": str(prefix / "renode" / "renode"),
+        # ESP-IDF 按官方安装方式位于 ~/esp/esp-idf，可用 IDF_PATH 覆盖；检查命令中 source 其 export.sh
+        "idf_path": os.environ.get("IDF_PATH") or str(Path.home() / "esp" / "esp-idf"),
     }
 
 

@@ -1,8 +1,32 @@
 # 验证工程运行结果
 
-生成时间：2026-11-05 17:46:15；技能提交：`efb394b-dirty`。本文件由 `tools/run_evals.py` 生成，不要手改。
+生成时间：2026-11-06 17:46:14；技能提交：`c269896-dirty`。本文件由 `tools/run_evals.py` 生成，不要手改。
 
-变体结论：MATCH 43，MISMATCH 0，NOT_RUN 0。
+变体结论：MATCH 50，MISMATCH 0，NOT_RUN 0。
+
+## esp-idf-app（profile `esp-idf`）
+
+帧解析组件（host 可测）+ GPIO 事件计数组件（IRAM ISR、portMUX 自旋锁、ESP_RETURN_ON_ERROR）+ OTA 回滚确认的应用；分别为 esp32 与 esp32s31 构建。
+
+| 变体 | 违反的规则 | 结论 | build_esp32 | build_esp32s31 | iram_esp32 | iram_esp32s31 | host_test |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `good` | — | MATCH | PASS | PASS | PASS | PASS | PASS |
+| `bad-no-iram` | `ESP-002` | MATCH | PASS | PASS | FAIL | FAIL | PASS |
+| `bad-xtensa-only` | `ESP-008` | MATCH | PASS | FAIL | PASS | BLOCKED | PASS |
+| `bad-legacy-driver` | `ESP-009` | MATCH | FAIL | FAIL | BLOCKED | BLOCKED | PASS |
+| `bad-no-length-check` | `PROTO-001` | MATCH | PASS | PASS | PASS | PASS | FAIL |
+| `bad-disable-interrupts` | `ESP-001` | MATCH | PASS | PASS | PASS | PASS | PASS |
+| `bad-error-check-abort` | `ESP-004` | MATCH | PASS | PASS | PASS | PASS | PASS |
+
+已知漏报（自动检查不能发现，需 review 或 test 补足）：
+
+- `bad-disable-interrupts`：ESP-001 是 review 规则：taskDISABLE_INTERRUPTS 只屏蔽当前核，构建与 host 测试都无法发现跨核竞争；需要双核目标上的压力测试或代码审查
+- `bad-error-check-abort`：ESP-004 是 review 规则：两种用法都能编译，host 测试不覆盖该组件，错误路径只能在审查或故障注入中发现
+
+未执行的检查：
+
+- `iram_esp32`：needs build_esp32 (FAIL)
+- `iram_esp32s31`：needs build_esp32s31 (FAIL)
 
 ## freertos-cpp（profile `mcu-rtos`）
 
@@ -105,6 +129,6 @@ ACME 帧接收 platform 驱动（devm、线程化中断、spinlock、dev_err_pro
 
 ## 规则覆盖
 
-`verify.method: auto` 的规则共 44 条，被至少一个变体违反并检验的有 19 条：`ARCH-001`, `ARCH-004`, `C-005`, `C-014`, `CFMT-002`, `CPP-001`, `CPP-002`, `CPP-004`, `CPP-005`, `CPP-008`, `CPP-009`, `LNXK-002`, `LNXK-004`, `LNXK-007`, `LNXK-008`, `LNXK-009`, `LNXK-010`, `ZEP-001`, `ZEP-002`。
+`verify.method: auto` 的规则共 47 条，被至少一个变体违反并检验的有 21 条：`ARCH-001`, `ARCH-004`, `C-005`, `C-014`, `CFMT-002`, `CPP-001`, `CPP-002`, `CPP-004`, `CPP-005`, `CPP-008`, `CPP-009`, `ESP-008`, `ESP-009`, `LNXK-002`, `LNXK-004`, `LNXK-007`, `LNXK-008`, `LNXK-009`, `LNXK-010`, `ZEP-001`, `ZEP-002`。
 
 所有 `coverage: full` 的规则都至少被一个变体检验。
