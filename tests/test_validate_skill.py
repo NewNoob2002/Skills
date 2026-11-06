@@ -153,6 +153,29 @@ class MutationTest(unittest.TestCase):
         append(self.skill / "SKILL.md", "\n" + "filler\n" * 200)
         self.assert_only_fails("frontmatter")
 
+    # -- 计数声明
+
+    def test_stale_profile_count(self):
+        replace(self.skill / "SKILL.md", "六个 profile", "五个 profile")
+        self.assert_only_fails("counts")
+        self.assertIn("profiles count says 5, actual 6", self.messages("counts"))
+
+    def test_stale_repo_doc_counts(self):
+        repo = self.tmp / "repo"
+        skill = repo / "skills" / "embedded-engineering"
+        shutil.copytree(self.skill, skill, symlinks=True)
+        proj = repo / "evals" / "projects" / "demo"
+        proj.mkdir(parents=True)
+        (proj / "eval.yaml").write_text("variants:\n  good: {}\n  bad-a: {}\n", encoding="utf-8")
+        (repo / "README.md").write_text(
+            "```text\nrules.yaml  # 1 条带 ID 的规则\n```\n\n1 个验证工程、3 个变体\n", encoding="utf-8")
+        got = self.statuses(skill, expect_exit=1)
+        self.assertEqual(got["counts"], "FAIL")
+        msgs = self.messages("counts")
+        self.assertTrue(any(m.startswith("rules count says 1,") for m in msgs), msgs)
+        self.assertIn("variants count says 3, actual 2", msgs)
+        self.assertFalse(any(m.startswith("projects") for m in msgs), msgs)
+
     # -- 引用
 
     def test_broken_link(self):

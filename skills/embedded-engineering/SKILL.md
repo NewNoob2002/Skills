@@ -16,7 +16,7 @@ description: >-
 
 # Embedded Engineering Baseline
 
-一个技能、五个 profile、三种角色。先选 profile，再按角色走流程，只加载需要的 reference。
+一个技能、六个 profile、三种角色。先选 profile，再按角色走流程，只加载需要的 reference。
 
 ## 0. 不可违反的护栏（所有 profile）
 

@@ -13,13 +13,13 @@
 ```text
 skills/embedded-engineering/      唯一的安装单元（install.sh 原样复制）
   SKILL.md                        护栏、profile 判定、工作流路由、reference 路由、机械门禁、输出约定（< 150 行）
-  standards/rules.yaml            123 条带 ID 的规则：profile、等级、验证方法与覆盖范围、出处章节、冲突
-  profiles/<id>.yaml              5 个 profile 的规范、测试基线、门禁命令
+  standards/rules.yaml            132 条带 ID 的规则：profile、等级、验证方法与覆盖范围、出处章节、冲突
+  profiles/<id>.yaml              6 个 profile 的规范、测试基线、门禁命令
   references/                     按领域分目录，按需加载（workflows、architecture、c、cpp、rtos、platforms、verification）
   scripts/                        detect_profile、arch_lint、cpp_cost、BARR-C 门禁、开销基准
   assets/                         BARR-C 与 C++ 的格式/静态分析配置、Ceedling 模板、代码模板、CI 模板
 tools/                            仓库级开发工具（不随技能安装）：validate_skill、run_evals、run_agent_evals、安装脚本
-evals/projects/                   五个验证工程（good + 故意引入问题的变体 + 预期）
+evals/projects/                   六个验证工程（good + 故意引入问题的变体 + 预期）
 evals/agent/                      Agent 行为评测用例
 tests/                            上述脚本与工具的回归测试
 ```
@@ -31,7 +31,7 @@ tests/                            上述脚本与工具的回归测试
 | 1 | **一个技能、内部分模块**，而不是任务书建议的 7 个独立技能 | 7 个技能的描述高度重叠，Agent 靠描述选择技能时容易选错；技能之间不能确定性地互相调用；护栏与 profile 判定会被复制多份 | 单个技能的描述需要覆盖所有触发词；P5 发现 Claude Code 在知识型问题上不调用技能（见验证报告） |
 | 2 | **渐进加载**：SKILL.md 只放路由，规则细节在 references，按任务读取 | 符合 Agent Skills 规范的上下文预算建议；Codex 实测按路由表只读取需要的 reference | reference 之间的交叉引用需要机械检查（`validate_skill.py` 的 links、sections） |
 | 3 | **rules.yaml 只收录可检查、有冲突或需按 ID 引用的规则**，不复制全部标准 | 全量结构化会与 references 漂移且无人消费 | 规则正文仍在 references；靠 `ref` 字段与“文档引用的 Rule ID 必须存在”检查保持一致 |
-| 4 | **自动验证要声明覆盖范围**（`coverage: full / partial` + `gap`） | 第二轮审查发现多条 `auto` 规则被工具部分覆盖却声称完整；验证工程进一步证实 3 条 `full` 声明不成立 | `full` 现仅 4 条；其余 40 条靠 review 补足，需人工判断 |
+| 4 | **自动验证要声明覆盖范围**（`coverage: full / partial` + `gap`） | 第二轮审查发现多条 `auto` 规则被工具部分覆盖却声称完整；验证工程进一步证实 3 条 `full` 声明不成立 | `full` 现仅 4 条；其余 43 条靠 review 补足，需人工判断 |
 | 5 | **按 profile 裁决冲突**，冲突双向登记 | 各生态规则本质冲突（格式、命名、错误码），无法统一 | 混合仓库需要按目录判定 profile |
 | 6 | **现代 C++ 按资源等级 T0–T3 取舍**，以链接产物为证据 | 不一刀切禁止；实测开销决定取舍；`cpp_cost.py` 在 ELF 上检出禁止的运行时 | 符号检查是间接证据：区分不了 ISR 内外的分配，`std::function` 只经 throw 辅助被检出 |
 | 7 | **校验器依赖 PyYAML**（放弃自写 YAML 子集解析器） | 两轮审查中子集解析器贡献了 10 余条缺陷；校验器是仓库工具，不随技能安装 | 没有 PyYAML 时退出码 2，并提示 `uv run --with pyyaml` |
@@ -54,9 +54,9 @@ tests/                            上述脚本与工具的回归测试
 
 | 层 | 工具 | 证明什么 | 不能证明什么 |
 | --- | --- | --- | --- |
-| 技能结构 | `tools/validate_skill.py`（技能 13 项 + 文档 3 项） | frontmatter 合规、引用与章节存在、可达性、规则库与 profile 的结构和一致性、打包卫生 | 内容在语义上正确 |
+| 技能结构 | `tools/validate_skill.py`（技能 14 项 + 文档 3 项） | frontmatter 合规、引用与章节存在、可达性、规则库与 profile 的结构和一致性、SKILL.md/README/design.md 中 profile、规则、验证工程与变体数和实际一致、打包卫生 | 内容在语义上正确 |
 | 脚本与工具 | `tests/`（unittest，变异测试为主） | 每个检查能检出对应缺陷；工具声明与实现一致（arch_lint、cpp_cost、detect_profile、clang-tidy 检查名） | 在真实工程上的检出率 |
-| 验证工程 | `tools/run_evals.py` | 在五个真实工程上，良好样例通过、问题变体被预期的检查检出；已知漏报被登记 | 未建模的错误类型；目标板上的时序与电气行为 |
+| 验证工程 | `tools/run_evals.py` | 在六个真实工程上，良好样例通过、问题变体被预期的检查检出；已知漏报被登记 | 未建模的错误类型；目标板上的时序与电气行为 |
 | Agent 行为 | `tools/run_agent_evals.py` | 技能是否被调用；护栏是否守住；技术决策是否符合规则 | 通过率的稳定性（已做 3 次重复并给 Wilson 区间）；未覆盖的提问方式 |
 | 硬件 | 方法与模板（`verification/cpp-testing.md` §6–§7、`verification/debugging.md`） | — | 本项目没有目标板，全部为 NOT_RUN |
 
@@ -70,7 +70,7 @@ tests/                            上述脚本与工具的回归测试
 | 验证工程的预期与样例由同一作者编写 | 预期可能迁就工具行为 | 首次运行的每处不一致都分诊并记录；已由独立模型复核 `eval.yaml`（`docs/independent-review.md`） |
 | 未对照原文的参考（RISC-V、ThreadX、MCUboot） | Agent 可能引用不准确的细节 | `sources.md` 标明核实状态；规则 `GEN-002` 要求具体芯片以手册为准 |
 | Agent 不调用技能 | 护栏与项目规则在知识型问答中不生效 | 见验证报告的 P5 结果与改进建议 |
-| 只有 19 条 auto 规则被验证工程检验（共 44 条） | 其余 auto 规则的检出能力未经实测 | 规则覆盖统计写入 `evals/RESULTS.md`；后续逐步补变体 |
+| 只有 21 条 auto 规则被验证工程检验（共 47 条） | 其余 auto 规则的检出能力未经实测 | 规则覆盖统计写入 `evals/RESULTS.md`；后续逐步补变体 |
 
 ## 7. 验收标准与完成状态
 
@@ -78,7 +78,7 @@ tests/                            上述脚本与工具的回归测试
 | --- | --- |
 | `validate_skill.py` 0 FAIL | 达成 |
 | `unittest` 全部通过（设置 `ETL_INCLUDE`、`CPPUTEST_PREFIX` 时无跳过） | 达成 |
-| 五个验证工程：良好样例全部 PASS，问题变体全部按预期检出，已知漏报全部登记 | 达成（43 MATCH） |
+| 六个验证工程：良好样例全部 PASS，问题变体全部按预期检出，已知漏报全部登记 | 达成（50 MATCH） |
 | 所有 `coverage: full` 的规则至少被一个变体检验 | 达成（4/4） |
 | Agent 行为评测有真实的运行记录 | 见验证报告 |
 | 未执行的验证标记为 NOT_RUN 并说明原因 | 达成（README 验证状态表、验证报告） |

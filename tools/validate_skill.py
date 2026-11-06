@@ -1063,6 +1063,71 @@ def check_profiles(skill: Path, exists: bool, data: object, rules_error: str | N
                     if not (isinstance(grun, str) and grun.strip()):
                         check.error(rel, None, f"gates[{idx}].run must be a non-empty string")
 
+# --------------------------------------------------------------------------- 计数声明
+
+CN_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+_NUM = r"(\d+|[一二两三四五六七八九十])"
+# 文档里的规模数字（profile、规则、验证工程、变体）容易在内容增加后过期；只核对这几种固定句式
+COUNT_PATTERNS = (
+    ("profiles", re.compile(_NUM + r"\s*个\s*profile")),
+    ("rules", re.compile(_NUM + r"\s*条带 ID 的规则")),
+    ("projects", re.compile(_NUM + r"\s*个验证工程")),
+    ("variants", re.compile(r"个验证工程、\s*" + _NUM + r"\s*个变体")),
+)
+# 与技能同仓库、描述其规模的文档；历史报告（如 validation-report.md）记录的是当时的数字，不核对
+COUNT_REPO_DOCS = ("README.md", "docs/design.md")
+
+
+def _to_int(token: str) -> int:
+    return int(token) if token.isdigit() else CN_NUM[token]
+
+
+def count_repo(skill: Path) -> Path | None:
+    """技能位于 <repo>/skills/<name> 时返回仓库根；否则（如复制到临时目录）不核对仓库级文档。"""
+    return skill.parent.parent if skill.parent.name == "skills" else None
+
+
+def actual_counts(skill: Path, rules_data: object) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if (skill / "profiles").is_dir():
+        counts["profiles"] = len(list((skill / "profiles").glob("*.yaml")))
+    if isinstance(rules_data, dict) and isinstance(rules_data.get("rules"), list):
+        counts["rules"] = len(rules_data["rules"])
+    repo = count_repo(skill)
+    projects = sorted((repo / "evals" / "projects").glob("*/eval.yaml")) if repo else []
+    if projects:
+        counts["projects"] = len(projects)
+        total = 0
+        for f in projects:
+            data = load_yaml(f.read_text(encoding="utf-8"))
+            variants = data.get("variants") if isinstance(data, dict) else None
+            if not isinstance(variants, dict):
+                return {k: v for k, v in counts.items() if k != "projects"}  # 结构不明时不核对工程/变体数
+            total += len(variants)
+        counts["variants"] = total
+    return counts
+
+
+def check_counts(skill: Path, rules_data: object, check: Check) -> None:
+    counts = actual_counts(skill, rules_data)
+    repo = count_repo(skill)
+    files = [skill / "SKILL.md"] + ([repo / d for d in COUNT_REPO_DOCS] if repo else [])
+    for path in files:
+        text = read_text_or_none(path)
+        if text is None:
+            continue
+        rel = path.name if path.parent == skill else str(path.relative_to(repo))
+        # 目录树等围栏代码块里也有规模数字，因此逐行扫描全文
+        for no, line in enumerate(text.splitlines(), 1):
+            for kind, pattern in COUNT_PATTERNS:
+                if kind not in counts:
+                    continue
+                for m in pattern.finditer(line):
+                    claimed = _to_int(m.group(1))
+                    if claimed != counts[kind]:
+                        check.error(rel, no, f"{kind} count says {claimed}, actual {counts[kind]}")
+
+
 def is_hygiene_violation(path: Path) -> bool:
     if path.is_dir() and not path.is_symlink():
         return path.name in HYGIENE_DIRS or HYGIENE_DIR_RE.match(path.name) is not None
@@ -1104,7 +1169,7 @@ def _run_check(check: Check, default_file: str, fn, *args, **kwargs):
 def validate_skill(skill: Path, cfg: dict) -> dict:
     checks = {cid: Check(cid) for cid in ("frontmatter", "links", "paths", "sections", "reachability", "orphans",
                                           "scripts", "data-json", "data-yaml", "openai-yaml", "rules",
-                                          "profiles", "hygiene")}
+                                          "profiles", "counts", "hygiene")}
     _run_check(checks["hygiene"], skill.name, check_hygiene, skill, cfg, checks["hygiene"])
     meta = _run_check(checks["frontmatter"], "SKILL.md", check_frontmatter, skill, cfg, checks["frontmatter"])
     ctx = RefContext(rel_base=skill, skill_roots=[skill], confine=skill, local_dirs=False,
@@ -1140,6 +1205,7 @@ def validate_skill(skill: Path, cfg: dict) -> dict:
                checks["rules"], docs)
     _run_check(checks["profiles"], "profiles/", check_profiles, skill, rules_exists, rules_data, rules_error,
                checks["profiles"])
+    _run_check(checks["counts"], skill.name, check_counts, skill, rules_data, checks["counts"])
     name = meta.get("name") if isinstance(meta, dict) else None
     return {"kind": "skill", "name": name or skill.name, "path": str(skill),
             "checks": [c.to_json() for c in checks.values()]}

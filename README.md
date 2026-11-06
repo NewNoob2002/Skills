@@ -41,7 +41,7 @@ C++ 部分不简单禁止现代特性，而是按资源等级（T0 极小 MCU �
 ```text
 skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此目录）
 ├── SKILL.md                    # 入口：护栏、profile、角色、路由
-├── standards/rules.yaml        # 123 条带 ID 的规则：适用 profile、等级、验证方法与覆盖范围、出处章节、冲突
+├── standards/rules.yaml        # 132 条带 ID 的规则：适用 profile、等级、验证方法与覆盖范围、出处章节、冲突
 ├── profiles/*.yaml            # 每个 profile 的规范、测试基线、门禁命令（与 rules.yaml 声明一一对应）
 ├── references/                 # 按需读取的规则
 │   ├── profiles.md             #   profile 判定与冲突裁决
@@ -70,7 +70,7 @@ skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此�
 │       └── templates/          #   驱动/总线/RAII/ISR 队列/DMA/组合根/CppUTest 模板
 ├── agents/openai.yaml          # Codex 显示元数据
 └── THIRD_PARTY_NOTICES.md
-tools/validate_skill.py         # Skill 自检：frontmatter、链接/路径/§ 引用、可达性、脚本、数据文件、规则库与 profile、打包卫生
+tools/validate_skill.py         # Skill 自检：frontmatter、链接/路径/§ 引用、可达性、脚本、数据文件、规则库与 profile、规模计数声明、打包卫生
 tools/validate_skill.json       # 每个技能的自检配置（SKILL.md 行数预算、外部源码树路径白名单）
 tests/test_scripts.py           # arch_lint、detect_profile 回归测试
 tests/test_validate_skill.py    # validate_skill 变异测试（逐项注入缺陷，含 rules/profiles）与 YAML 解析测试
@@ -120,9 +120,9 @@ research/                       # 来源矩阵与规范冲突分析
 
 | 项 | 结果 |
 | --- | --- |
-| `python3 tools/validate_skill.py`（技能 13 项 + README、docs/、research/ 的 6 份文档各 3 项检查，共 31 项） | PASS |
+| `python3 tools/validate_skill.py`（技能 14 项 + README、docs/、research/ 的 6 份文档各 3 项检查，共 32 项） | PASS |
 | `python3 -m unittest discover -s tests -v`（历史验收 221 个用例；后续评测工具修复与验证见 `docs/validation-report.md` §8；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 后运行完整模板检查） | 历史验收 PASS；本轮验证见 `docs/validation-report.md` §8 |
-| `python3 tools/run_evals.py --strict`：5 个验证工程、43 个变体（5 个良好样例 + 38 个故意引入问题的变体），结果见 `evals/RESULTS.md` | PASS：43 MATCH，0 MISMATCH，0 NOT_RUN；5 个已知漏报（review 规则）均已登记 |
+| `python3 tools/run_evals.py --strict`：6 个验证工程、50 个变体（6 个良好样例 + 44 个故意引入问题的变体），结果见 `evals/RESULTS.md` | PASS：50 MATCH，0 MISMATCH，0 NOT_RUN；7 个已知漏报（review 规则）均已登记 |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |
 | C++ 模板 clang-format（`assets/cpp/.clang-format`）与 clang-tidy（`assets/cpp/.clang-tidy`，含头文件） | PASS |
