@@ -47,7 +47,7 @@ verify_tools:
   idf_build:
     external: "idf.py set-target <target> && idf.py build"
   idf_astyle:
-    external: "pre-commit run --files <files> astyle_py"
+    external: "pre-commit run astyle_py --files <files>"
   idf_pytest:
     external: "pytest --target <target> <test_apps>（pytest-embedded）"
   arch_lint:
@@ -347,7 +347,8 @@ rules:
     verify:
       method: auto
       tool: barrc_check
-      coverage: full
+      coverage: partial
+      gap: "存在 compile_commands.json 时仅检查有编译命令的 .c 条目，.h 头文件不检查"
 
   - id: C-006
     title: "比较与算术中不混用有符号与无符号"
@@ -545,7 +546,8 @@ rules:
     verify:
       method: auto
       tool: barrc_check
-      coverage: full
+      coverage: partial
+      gap: "存在 compile_commands.json 时仅检查有编译命令的 .c 条目，.h 头文件不检查"
     conflicts: [LNXK-001]
 
   - id: CFMT-003
@@ -710,7 +712,7 @@ rules:
   - id: RTOS-003
     title: "内核对象静态创建，初始化完成后不再动态分配"
     level: mandatory
-    profiles: [mcu-baremetal, mcu-rtos, esp-idf]
+    profiles: [mcu-rtos, esp-idf]
     lang: [c, cpp]
     source: [rovinax, freertos]
     ref: references/rtos/mcu-isr-rtos.md §4

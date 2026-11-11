@@ -74,11 +74,30 @@ if [ -e "$target" ] && [ "$overwrite" -ne 1 ]; then
     exit 1
 fi
 run mkdir -p "$dest"
-# 先完整复制到临时目录，成功后再替换旧版本，避免中途失败时既丢旧版又留下半个新版。
+# 先复制，再把旧版移到备份；替换失败时保留并恢复旧版。
 tmp="$dest/.$SKILL_NAME.tmp.$$"
+backup="$dest/.$SKILL_NAME.bak.$$"
+cleanup() {
+    status=$?
+    trap - 0 HUP INT TERM
+    if [ -e "$backup" ] && [ ! -e "$target" ]; then
+        if ! mv "$backup" "$target"; then
+            echo "error: restore failed; old version retained at $backup" >&2
+            status=1
+        fi
+    fi
+    [ ! -e "$tmp" ] || rm -rf "$tmp"
+    exit "$status"
+}
+if [ "$dry_run" -ne 1 ]; then
+    [ ! -e "$tmp" ] && [ ! -e "$backup" ] || { echo "error: staging path exists" >&2; exit 1; }
+    trap cleanup 0
+    trap 'exit 1' HUP INT TERM
+fi
 run cp -R "$SRC_DIR" "$tmp"
-[ -e "$target" ] && run rm -rf "$target"
+[ ! -e "$target" ] || run mv "$target" "$backup"
 run mv "$tmp" "$target"
+[ ! -e "$backup" ] || run rm -rf "$backup"
 echo "installed: $target"
 
 if [ "$scope" = project ] && [ -n "$agent" ]; then
@@ -88,7 +107,7 @@ if [ "$scope" = project ] && [ -n "$agent" ]; then
             echo "skip: $proj/AGENTS.md exists (merge assets/AGENTS.md.template manually)"
         else
             run cp "$SRC_DIR/assets/AGENTS.md.template" "$proj/AGENTS.md"
-            echo "next: fill the placeholders in $proj/AGENTS.md"
+            echo "next: fill the placeholders in $proj/AGENTS.md (choose one of six profiles; list by directory if multiple)"
         fi
     fi
     if [ "$with_barrc" -eq 1 ]; then

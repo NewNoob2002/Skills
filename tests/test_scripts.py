@@ -45,6 +45,14 @@ class ArchLintTest(unittest.TestCase):
             self.assertEqual(code, 0, out + err)
             self.assertIn("0 violation(s)", out)
 
+    def test_same_submodule_dependencies_are_not_cycles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write(tmp, "module/motor/motor.c", '#include "motor.h"\n')
+            write(tmp, "module/motor/motor.h", '#pragma once\n#include "motor.h"\n')
+            code, out, err = run(ARCH_LINT, tmp, "--json")
+            self.assertEqual(code, 0, out + err)
+            self.assertEqual(json.loads(out)["violations"], [])
+
     def test_detects_violations(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.make_clean_repo(tmp)

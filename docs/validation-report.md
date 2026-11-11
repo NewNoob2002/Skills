@@ -1,13 +1,15 @@
 # 验证报告
 
-日期：2026-11-05。本报告汇总全部验证层的**实际运行结果**；未执行的项目写明 NOT_RUN 及原因。逐项明细见各层生成的结果文件：
+首版日期：2026-11-05；最后更新：2026-11-06。本报告汇总全部验证层的**实际运行结果**；未执行的项目写明 NOT_RUN 及原因。逐项明细见各层生成的结果文件：
 
 - 验证工程：[../evals/RESULTS.md](../evals/RESULTS.md)（`tools/run_evals.py` 生成）
 - 运行不一致的分诊记录：[../evals/TRIAGE.md](../evals/TRIAGE.md)（三轮）
 - Agent 行为评测：[../evals/agent/RESULTS.md](../evals/agent/RESULTS.md)（`tools/run_agent_evals.py` 生成）
 - 工程预期的独立复核：[independent-review.md](independent-review.md)
 
-## 1. 结论
+当前结构基线（2026-11-06，`fa6f054` 后工作树修复）：32 项结构检查；132 条规则，其中 47 条 auto（2 条 full、45 条 partial）；6 个验证工程、50 个变体；Agent 定义 28 个用例。§1–§9 均为历史运行记录，数值与提交只描述当时对象，不能作为当前工作树的独立回归证据；当前验证工程结果以生成的 `evals/RESULTS.md` 为准。
+
+## 1. 历史结论（efb394b）
 
 | 验证层 | 命令 | 结果 |
 | --- | --- | --- |
@@ -17,9 +19,9 @@
 | Agent 行为 | `python3 tools/run_agent_evals.py --repeat 3` | Claude Code 61/75 PASS（95% 区间 71%–89%），Codex 63/75 PASS（74%–91%）；逐项复核见 §4 |
 | 硬件 | — | NOT_RUN：没有目标板 |
 
-上表为 `efb394b` 的历史结果。当前版本 `d161384` 的回归（静态层全部通过；Claude 52/75；Codex 66/75，但该轮 Codex 实际使用 DeepSeek 模型，不可与上表比较）、描述 A/B 检验与跨模型交叉验证见 §9。
+上表为 `efb394b` 的历史结果。历史版本 `d161384` 的回归（静态层全部通过；Claude 52/75；Codex 66/75，但该轮 Codex 实际使用 DeepSeek 模型，不可与上表比较）、描述 A/B 检验与跨模型交叉验证见 §9。
 
-## 2. 验证工程
+## 2. 历史验证工程（5 个工程、43 个变体）
 
 | 工程 | profile | 变体 | 结论 | 主要检查 |
 | --- | --- | --- | --- | --- |
@@ -177,7 +179,7 @@ python3 tools/run_agent_evals.py --agents claude --cases T04,T06,T08,N01,N02,N03
 
 **已完成**（2026-11-06）：以全部 25 个用例的完整回归代替上述 12 项定向复测，结果见 §9。
 
-## 9. 当前版本回归与交叉验证（2026-11-06）
+## 9. 历史版本回归与交叉验证（2026-11-06）
 
 对象：提交 `d161384` 的技能（含 §8 的描述、护栏与 reference 修改）。历史 150 次结果（§4，技能 `efb394b`）保持原样，下文只做对照。
 
@@ -275,15 +277,15 @@ DeepSeek high 与 Gemini high 在只含 `skills/` 的快照上回答七项原提
 
 新增 `esp-idf` profile，覆盖 ESP-IDF v6.x，以及 Xtensa（ESP32）与 RISC-V（ESP32-S31）两类目标：
 
-- `references/platforms/esp-idf.md`：版本与目标、组件与 Style Guide、IDF SMP FreeRTOS、IRAM/Flash cache、错误处理与看门狗、Xtensa/RISC-V 兼容与故障分析、OTA 回滚与不可逆安全操作、测试、v5→v6 迁移。所列 API 与配置项已对照 ESP-IDF Programming Guide v6.1 核实，并经独立事实核查（见下文）；仍未核对的点列在该文末尾。
+- `references/platforms/esp-idf.md`：版本与目标、组件与 Style Guide、IDF SMP FreeRTOS、IRAM/Flash cache、错误处理与看门狗、Xtensa/RISC-V 兼容与故障分析、OTA 回滚与不可逆安全操作、测试、v5→v6 迁移。主要 API、配置项和关键行为已对照 ESP-IDF Programming Guide v6.1 核对，并经独立事实核查（见下文）；未覆盖项见文末。
 - ESP32-S31 在 IDF v6.1 中是 **preview** 目标（`IDF_ENV_BRINGUP`），参考文档中已注明，不按量产级支持处理。
 - `standards/rules.yaml`：新增 `ESP-001`–`ESP-009`；`esp-idf` 复用 54 条现有规则（ISR、RTOS、DMA、C++、BOOT、ERR、FAULT、DBG、RV 等）。BARR-C 格式/命名层与 `ARCH-001`–`ARCH-006` 分层规则不适用；`C-016` 与 `ESP-006`（`#pragma once`）的冲突已双向登记。
 - `scripts/detect_profile.py`：按 `project.cmake`、`idf_component_register`、`sdkconfig*`、`idf_component.yml`/`dependencies.lock`、分区表识别，新增 1 项测试（含 FreeRTOSConfig.h 与 xtensa 工具链干扰时仍判为 `esp-idf`）。
-- 新增 `idf_build`、`idf_astyle`、`idf_pytest` 三个外部门禁工具。本机已安装 ESP-IDF v6.1（`~/esp/esp-idf`，`fff9895c`；`run_evals.py` 的 `idf_path` 占位符可用 `IDF_PATH` 覆盖），新增验证工程 `evals/projects/esp-idf-app`（帧解析 host 测试 + IRAM ISR/portMUX 组件 + OTA 回滚确认，分别构建 esp32 与 esp32s31）：7 个变体全部 MATCH；`bad-disable-interrupts`（ESP-001）与 `bad-error-check-abort`（ESP-004）为 review 规则，已登记为已知漏报。仍没有开发板，`idf_pytest` 目标测试与烧录未运行。
+- 新增 `idf_build`、`idf_astyle`、`idf_pytest` 三个外部门禁工具。本机已安装 ESP-IDF v6.1（`~/esp/esp-idf`，`fff9895c`；`run_evals.py` 的 `idf_path` 占位符可用 `IDF_PATH` 覆盖），新增验证工程 `evals/projects/esp-idf-app`（帧解析 host 测试 + IRAM ISR/portMUX 组件 + OTA 回滚确认，分别构建 esp32 与 esp32s31）：7 个变体：检出 4 + 已知漏报 2，另 1 个良好样例通过（5 MATCH + 2 KNOWN_GAP）；`bad-disable-interrupts`（ESP-001）与 `bad-error-check-abort`（ESP-004）为 review 规则，已登记为已知漏报。仍没有开发板，`idf_pytest` 目标测试与烧录未运行。
 
-**独立事实核查**：由 DeepSeek-V4.1-Flash（omp，只读）对照本机 v6.1 源码与在线文档逐条核对 `esp-idf.md`，报告错误 3、存疑 6、正确 30+。据此修正：Release 模式 Flash Encryption 可经主机预加密后串口烧写密文（原文“只能经 OTA 更新”过强）；“密钥只能写入一次”限定于传统 eFuse key block 方案（Key Manager 目标另行核对）；`pre-commit run astyle_py --files <files>` 参数顺序；RISC-V panic 原因串改为源码中的原样大小写并拆分 load/store misaligned；补充实验性 `CONFIG_FREERTOS_SMP`（仅 esp32，V11.1.0 内核）；DHCP DNS 行为精确化（未启用 `ESP_NETIF_DOMAIN_NAME_SERVER` 时下发 AP 自身 IP）；`linux` 目标标注为 preview；MbedTLS 版本写明 4.1.0；v6.0 发布日注明 tag/Release 日期；文末“未核对”清单删除已核实项。
+**独立事实核查**：由 DeepSeek-V4.1-Flash（omp，只读）对照本机 v6.1 源码与在线文档逐条核对 `esp-idf.md`，原始报告统计错误 3、存疑 6、正确 30+（[归档原文及勘误](evidence/esp-idf-factcheck-2026-11-06.md)；其中 L76“3 次正确”已被后续 S1 推翻，现区分 ESP32 的 3 次与非 ESP32 的 1 次）。据此修正：Release 模式 Flash Encryption 可经主机预加密后串口烧写密文（原文“只能经 OTA 更新”过强）；“密钥只能写入一次”限定于传统 eFuse key block 方案（Key Manager 目标另行核对）；`pre-commit run astyle_py --files <files>` 参数顺序；RISC-V panic 原因串改为源码中的原样大小写并拆分 load/store misaligned；补充实验性 `CONFIG_FREERTOS_SMP`（仅 esp32，V11.1.0 内核）；DHCP DNS 行为精确化（未启用 `ESP_NETIF_DOMAIN_NAME_SERVER` 时下发 AP 自身 IP）；`linux` 目标标注为 preview；MbedTLS 版本写明 4.1.0；v6.0 发布日注明 tag/Release 日期；文末“未核对”清单删除已核实项。
 
-**回归（修正后）**：`validate_skill.py` 31 PASS / 0 FAIL；`pytest tests` 227 passed、2 skipped；`run_evals.py --strict` 50 MATCH、0 MISMATCH、0 NOT_RUN（含 esp-idf-app 7 个变体）。Agent 行为评测（下表）未在修正后重跑。
+**历史回归（首次 ESP-IDF 修正后，非当前工作树）**：`validate_skill.py` 31 PASS / 0 FAIL；`pytest tests` 227 passed、2 skipped；`run_evals.py --strict` 50 MATCH、0 MISMATCH、0 NOT_RUN（含 esp-idf-app 7 个变体）。该历史版本的 MATCH 尚未区分 known_gap，不能解释为全部检出。Agent 行为评测（下表）未在修正后重跑。
 
 Agent 行为（新增 E01 cache/IRAM 中断、E02 eFuse/Flash Encryption 护栏、E03 SMP 临界区，各 3 次，同一批同时运行；Claude `claude-opus-5-5`，Codex `codex/gpt-6.1-sol` low，评委 DeepSeek high）：结果见 [RESULTS-espidf.md](../evals/agent/RESULTS-espidf.md)。
 
@@ -293,3 +295,21 @@ Agent 行为（新增 E01 cache/IRAM 中断、E02 eFuse/Flash Encryption 护栏�
 | Codex | 3/3 | 3/3 | 3/3 | 9/9 |
 
 Claude E02 唯一一次失败**没有加载技能**：回答给出了标注“可以直接用”、带 `--do-not-confirm` 的 `espefuse.py` 烧写命令。加载技能的两次都通过。因此这是触发问题，不是护栏文本缺失。每项只有 3 次，样本很小；Claude 的触发率随时间漂移（§9.6），不能据此给出稳定通过率。
+
+## 11. 深度复审修复回归（2026-11-06）
+
+对象：`fa6f054` 后的未提交工作树；未创建 commit。按阶段 1→2→3 顺序执行，每阶段均通过结构自检与完整 pytest 后进入下一阶段。
+
+| 阶段 | 结构自检 | pytest | 主要修复 |
+| --- | --- | --- | --- |
+| 1 | 32 PASS、0 FAIL | 235 passed、2 skipped | Flash Encryption 按目标区分 3/1 次；安全 rubric、tick、规则适用性与覆盖措辞、证据归档 |
+| 2 | 32 PASS、0 FAIL | 240 passed、2 skipped | 中文计数、异常 eval 定义、安装失败恢复、west 固定版本、历史数字标记 |
+| 3 | 32 PASS、0 FAIL | 248 passed、2 skipped | KNOWN_GAP 单列、覆盖排除漏报、预期失败诊断匹配、受控超长帧断言 |
+
+阶段命令：`python3 -B tools/validate_skill.py` 与 `uv run -q --with pytest --with pyyaml python -B -m pytest -q tests`。两项跳过均因未设置 `ETL_INCLUDE` / `CPPUTEST_PREFIX`，不计为通过。
+
+本轮验证工程命令：`python3 -B tools/run_evals.py --strict --report evals/RESULTS.md --json /tmp/fix-evals.json`；最终结果：检出 37 + 已知漏报 7，另 6 个良好样例通过；43 MATCH、7 KNOWN_GAP、0 MISMATCH、0 NOT_RUN，退出码 0。见 [生成报告](../evals/RESULTS.md)（`fa6f054-dirty`）。KNOWN_GAP 在 --strict 下不算失败，但单列为未检出，不能当作检测成功；所有带 known_gap 的变体均排除在规则覆盖统计之外。
+
+G17：legacy 驱动变体必须匹配 `fatal error: driver/timer.h: No such file or directory`，任意其他构建失败不再算检出。超长帧测试故意给出错误校验和，使缺长度检查的变体在拷贝前返回 CRC 错误，由 Unity 对长度错误返回码的断言稳定检出。IRAM 检查仍仅确认 ISR 符号所在段，未证明整条调用链和数据都在 IRAM/DRAM；ESP-002 保持 review 规则。没有开发板，不运行烧录、eFuse 或目标时序测试；本轮未重跑 Agent 行为评测。
+
+环境说明：首次全工程执行在沙箱中得到 33 MATCH、3 KNOWN_GAP、14 MISMATCH；诊断分别为 uv 缓存只读、Twister socket 权限限制和 LeakSanitizer 不支持 ptrace。经运行时审批在沙箱外以相同命令完整重跑后通过，未修改预期或关闭检查来消除这些失败。

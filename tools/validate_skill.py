@@ -1065,8 +1065,10 @@ def check_profiles(skill: Path, exists: bool, data: object, rules_error: str | N
 
 # --------------------------------------------------------------------------- 计数声明
 
-CN_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-_NUM = r"(\d+|[一二两三四五六七八九十])"
+CN_NUM = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+          "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+CN_UNITS = {"十": 10, "百": 100, "千": 1000, "万": 10000, "亿": 100000000}
+_NUM = r"(\d+|[零〇一二两三四五六七八九十百千万亿]+)"
 # 文档里的规模数字（profile、规则、验证工程、变体）容易在内容增加后过期；只核对这几种固定句式
 COUNT_PATTERNS = (
     ("profiles", re.compile(_NUM + r"\s*个\s*profile")),
@@ -1079,7 +1081,24 @@ COUNT_REPO_DOCS = ("README.md", "docs/design.md")
 
 
 def _to_int(token: str) -> int:
-    return int(token) if token.isdigit() else CN_NUM[token]
+    if token.isdigit():
+        return int(token)
+    total = section = number = 0
+    for char in token:
+        if char in CN_NUM:
+            number = number * 10 + CN_NUM[char]
+        else:
+            unit = CN_UNITS[char]
+            if unit < 10000:
+                section += (number or 1) * unit
+            elif unit == 10000:
+                total += (section + number) * unit
+                section = 0
+            else:
+                total = (total + section + number) * unit
+                section = 0
+            number = 0
+    return total + section + number
 
 
 def count_repo(skill: Path) -> Path | None:
@@ -1087,29 +1106,41 @@ def count_repo(skill: Path) -> Path | None:
     return skill.parent.parent if skill.parent.name == "skills" else None
 
 
-def actual_counts(skill: Path, rules_data: object) -> dict[str, int]:
+def actual_counts(skill: Path, rules_data: object, check: Check) -> dict[str, int]:
     counts: dict[str, int] = {}
     if (skill / "profiles").is_dir():
         counts["profiles"] = len(list((skill / "profiles").glob("*.yaml")))
     if isinstance(rules_data, dict) and isinstance(rules_data.get("rules"), list):
         counts["rules"] = len(rules_data["rules"])
     repo = count_repo(skill)
-    projects = sorted((repo / "evals" / "projects").glob("*/eval.yaml")) if repo else []
-    if projects:
+    project_root = repo / "evals" / "projects" if repo else None
+    if project_root and project_root.is_dir():
+        projects = sorted(p for p in project_root.iterdir() if p.is_dir())
         counts["projects"] = len(projects)
         total = 0
-        for f in projects:
-            data = load_yaml(f.read_text(encoding="utf-8"))
+        valid = True
+        for project in projects:
+            f = project / "eval.yaml"
+            rel = str(f.relative_to(repo))
+            try:
+                data = load_yaml(f.read_text(encoding="utf-8"))
+            except (OSError, YamlSyntaxError) as exc:
+                check.error(rel, getattr(exc, "lineno", None), f"cannot read eval.yaml: {exc}")
+                valid = False
+                continue
             variants = data.get("variants") if isinstance(data, dict) else None
             if not isinstance(variants, dict):
-                return {k: v for k, v in counts.items() if k != "projects"}  # 结构不明时不核对工程/变体数
+                check.error(rel, None, "variants must be a mapping")
+                valid = False
+                continue
             total += len(variants)
-        counts["variants"] = total
+        if valid:
+            counts["variants"] = total
     return counts
 
 
 def check_counts(skill: Path, rules_data: object, check: Check) -> None:
-    counts = actual_counts(skill, rules_data)
+    counts = actual_counts(skill, rules_data, check)
     repo = count_repo(skill)
     files = [skill / "SKILL.md"] + ([repo / d for d in COUNT_REPO_DOCS] if repo else [])
     for path in files:

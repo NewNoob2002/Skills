@@ -1,6 +1,6 @@
 # ESP-IDF v6.x（ESP32 Xtensa 与 RISC-V 目标）
 
-适用 profile：`esp-idf`。本文的 API 名称、配置项与行为均对照 ESP-IDF Programming Guide v6.1（2026-11-06 核实，链接见文末）。用于具体芯片前，按 `sdkconfig` / `dependencies.lock` 中的实际 IDF 版本和目标芯片的技术参考手册（TRM）再核对；查不到的写 `UNKNOWN`（`GEN-002`）。
+适用 profile：`esp-idf`。本文的主要 API、配置项和关键行为已对照 ESP-IDF Programming Guide v6.1 核对（2026-11-06，链接见文末）；未覆盖项见文末。用于具体芯片前，按 `sdkconfig` / `dependencies.lock` 中的实际 IDF 版本和目标芯片的技术参考手册（TRM）再核对；查不到的写 `UNKNOWN`（`GEN-002`）。
 
 ## 1. 版本与目标
 
@@ -28,7 +28,7 @@
 IDF 默认的 FreeRTOS 基于 Vanilla v10.5.1 并加入 SMP 支持（实验性的 `CONFIG_FREERTOS_SMP` 仅限 `esp32`，会改用 Amazon SMP 内核 V11.1.0，细节按该内核核对），与原版有几处会导致错误代码的差异：
 
 - **临界区是自旋锁**（`ESP-001`）：用 `portMUX_TYPE` 定义（静态初始化 `portMUX_INITIALIZER_UNLOCKED`，动态 `portMUX_INITIALIZE()`），任务中 `taskENTER_CRITICAL(&mux)` / `taskEXIT_CRITICAL(&mux)`，ISR 中 `taskENTER_CRITICAL_ISR(&mux)` / `taskEXIT_CRITICAL_ISR(&mux)`。临界区要短，不在其中调用 FreeRTOS API 或任何会阻塞、让出的函数；嵌套须配对，交叉使用不同自旋锁可能死锁。
-- `taskDISABLE_INTERRUPTS()` 只作用于当前核，**不能**作为 SMP 互斥手段；`vTaskSuspendAll()` 只暂停调用核的调度，另一核上未绑核的任务照常运行，同样不是互斥手段（在 Core 0 上调用还会冻结 tick，拖慢全系统计时）。
+- `taskDISABLE_INTERRUPTS()` 只作用于当前核，**不能**作为 SMP 互斥手段；`vTaskSuspendAll()` 只暂停调用核的调度，另一核上未绑核的任务照常运行，同样不是互斥手段（在 Core 0 上调用会推迟 tick 计数、延时任务处理与调度，恢复时补处理 pended ticks；硬件 tick 中断仍会发生）。
 - **任务创建**：`xTaskCreatePinnedToCore()` / `xTaskCreateStaticPinnedToCore()` 的 `xCoreID` 取 `0`、`1` 或 `tskNO_AFFINITY`；`xTaskCreate()` 等价于 `tskNO_AFFINITY`。单核配置下该参数被忽略。对时序敏感或与绑核外设中断交互的任务显式绑核，并在设计中写明理由（`ESP-003`）。
 - **栈深度单位是字节**（原版是字），`uxTaskGetStackHighWaterMark()` 也返回字节；从其他 FreeRTOS 工程移植时不要照搬数值（`RTOS-002`）。
 - ISR 中只用 `FromISR` API 并以 `portYIELD_FROM_ISR()` 结束（`ISR-004`）；任务优先级数值语义与原版相同（数值越大越高）。
@@ -73,7 +73,7 @@ IDF 默认的 FreeRTOS 基于 Vanilla v10.5.1 并加入 SMP 支持（实验性�
 - **回滚**（`ESP-007`）：启用 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`。新镜像首次启动处于 `ESP_OTA_IMG_PENDING_VERIFY`，自检通过后调用 `esp_ota_mark_app_valid_cancel_rollback()`，失败调用 `esp_ota_mark_app_invalid_rollback_and_reboot()`；两者都不调用就复位会回滚。新镜像只有一次启动机会，自检要尽早完成，避免掉电被误判为失败。factory 分区不参与回滚。
 - **防回滚**：`CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK` 把安全版本写入 eFuse，镜像版本低于 eFuse 记录值时拒绝启动；eFuse 位数有限（ESP32 上最多 32 次），发布流程要规划版本号的使用（`BOOT-003`）。
 - **不可逆硬件动作**（`ESP-005`，同 `GEN-001`）：烧写 eFuse（包括密钥、安全版本、JTAG/下载模式禁用）、启用 Secure Boot、启用 Flash Encryption 都不能撤销或只能有限次撤销：
-  - 传统 eFuse key block 方案中 Flash Encryption 密钥写入 eFuse“只能进行一次”（支持 Key Manager 的目标如 `esp32c5`/`esp32p4` 按该目标安全文档核对密钥部署方式）；Release 模式下 UART 下载模式不再执行加密，明文固件只能经 OTA 写入，持有同一密钥副本时才能在主机预加密后经串口烧写密文；Development 模式下每颗芯片最多关闭加密 3 次。误启用加密后烧写明文数据会使芯片软变砖。
+  - 传统 eFuse key block 方案中 Flash Encryption 密钥写入 eFuse“只能进行一次”（支持 Key Manager 的目标如 `esp32c5`/`esp32p4` 按该目标安全文档核对密钥部署方式）；Release 模式下 UART 下载模式不再执行加密，明文固件只能经 OTA 写入，持有同一密钥副本时才能在主机预加密后经串口烧写密文；Development 模式下 ESP32 每颗芯片最多关闭加密 3 次，非 ESP32 目标每颗芯片仅 1 次（包括 ESP32-S31，不能套用 ESP32 的次数）。误启用加密后烧写明文数据会使芯片软变砖。
   - 禁用 ROM 下载模式后 `esptool` 无法再连接芯片。
   - 处理流程：先确认完整芯片型号与版本（含 ECO 版本）、IDF 版本、密钥保管与产线流程；先在 Development 模式或 QEMU 中验证；给出命令时说明后果，并要求用户在执行前确认具体设备并接受不可逆后果。型号、版本或密钥方案未知时不写可直接执行的 eFuse/安全启用命令。v6 中 `idf.py` 的 eFuse 命令需要显式指定端口。
 - v6 的 TLS/密码学基于 MbedTLS 4.x（v6.1 为 4.1.0），以 PSA Crypto API 为主；在正常启动流程之前运行的代码需要自行调用 `psa_crypto_init()`。

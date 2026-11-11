@@ -45,10 +45,15 @@ variants:
     violates: [ESP-009]
     note: "包含 v6 已移除的 legacy 驱动头 driver/timer.h：两个目标都编译失败"
     expect: {build_esp32: FAIL, build_esp32s31: FAIL, iram_esp32: BLOCKED, iram_esp32s31: BLOCKED}
+    expect_output:
+      build_esp32: "fatal error: driver/timer[.]h: No such file or directory"
+      build_esp32s31: "fatal error: driver/timer[.]h: No such file or directory"
   bad-no-length-check:
     violates: [PROTO-001]
-    note: "长度字段不与上限比较：超长帧用例期望 ESP_ERR_INVALID_SIZE，实际越界拷贝"
+    note: "长度字段不与上限比较：超长帧故意带错误校验和，期望 ESP_ERR_INVALID_SIZE，变体受控返回 ESP_ERR_INVALID_CRC，在拷贝前失败，不依赖越界崩溃"
     expect: {host_test: FAIL}
+    expect_output:
+      host_test: "test_oversized_length_rejected:FAIL:.*Expected"
   bad-disable-interrupts:
     violates: [ESP-001]
     note: "用 taskDISABLE_INTERRUPTS 代替 portMUX 自旋锁，ISR 侧不加锁"

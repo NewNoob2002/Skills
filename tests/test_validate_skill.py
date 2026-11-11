@@ -50,6 +50,69 @@ def replace(path, old, new):
 
 
 class ValidateRealRepoTest(unittest.TestCase):
+    def test_readme_skill_lines_and_current_agent_cases_are_fresh(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        lines = re.search(r"`SKILL.md` 当前 (\d+) 行", readme)
+        cases = re.search(r"Agent 当前定义 (\d+) 个用例", readme)
+        self.assertIsNotNone(lines)
+        self.assertIsNotNone(cases)
+        self.assertEqual(int(lines.group(1)), len((SKILL / "SKILL.md").read_text().splitlines()))
+        actual_cases = load_tool_module().load_yaml((ROOT / "evals/agent/cases.yaml").read_text())["cases"]
+        self.assertEqual(int(cases.group(1)), len(actual_cases))
+
+    def test_multi_character_chinese_counts(self):
+        vs = load_tool_module()
+        for token, count in (("十一", 11), ("二十", 20), ("一百三十二", 132), ("132", 132),
+                             ("十", 10), ("一千零一", 1001), ("二〇二六", 2026),
+                             ("一亿二千三百万", 123000000)):
+            with self.subTest(token=token):
+                self.assertEqual(vs._to_int(token), count)
+                with tempfile.TemporaryDirectory() as tmp:
+                    skill = Path(tmp) / "embedded-engineering"
+                    skill.mkdir()
+                    (skill / "SKILL.md").write_text(f"{token}条带 ID 的规则", encoding="utf-8")
+                    check = vs.Check("counts")
+                    vs.check_counts(skill, {"rules": [{}] * count} if count < 2000 else {}, check)
+                    self.assertEqual(check.status, "PASS", check.findings)
+                    if count < 2000:
+                        check = vs.Check("counts")
+                        vs.check_counts(skill, {"rules": [{}] * (count + 1)}, check)
+                        self.assertIn(f"rules count says {count}, actual {count + 1}",
+                                      [f.message for f in check.findings])
+
+    def test_invalid_eval_counts_report_path_and_preserve_project_count(self):
+        vs = load_tool_module()
+        for content in (None, "variants: [", "variants: []\n", "project: demo\n", "[]\n"):
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                skill = repo / "skills" / "embedded-engineering"
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text("", encoding="utf-8")
+                project = repo / "evals" / "projects" / "demo"
+                project.mkdir(parents=True)
+                if content is not None:
+                    (project / "eval.yaml").write_text(content, encoding="utf-8")
+                (repo / "README.md").write_text("2 个验证工程、99 个变体", encoding="utf-8")
+                check = vs.Check("counts")
+                counts = vs.actual_counts(skill, {}, check)
+                self.assertEqual(counts["projects"], 1)
+                self.assertNotIn("variants", counts)
+                self.assertEqual(check.status, "FAIL")
+                self.assertEqual(check.findings[0].file, "evals/projects/demo/eval.yaml")
+                self.assertNotIn("internal error", check.findings[0].message)
+                vs.check_counts(skill, {}, check)
+                self.assertIn("projects count says 2, actual 1", [f.message for f in check.findings])
+
+    def test_astyle_hook_precedes_files(self):
+        old_order = "--files <files>" + " astyle_py"
+        candidates = [ROOT / "README.md", ROOT / "install.sh"]
+        for directory in (ROOT / "skills", ROOT / "tools", ROOT / "tests",
+                          ROOT / "docs", ROOT / "evals", ROOT / "research"):
+            candidates.extend(directory.rglob("*"))
+        for path in candidates:
+            if path.is_file() and path.suffix in (".md", ".yaml", ".yml", ".py", ".sh", ".template"):
+                self.assertNotIn(old_order, path.read_text(encoding="utf-8"), str(path))
+
     def test_repo_skills_and_readme_pass(self):
         code, out, err = run_tool("--json")
         self.assertEqual(code, 0, out + err)

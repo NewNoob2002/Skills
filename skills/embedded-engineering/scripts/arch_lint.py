@@ -153,7 +153,7 @@ def expand_patterns(refs, config):
 
 
 def find_cycles(graph):
-    """Tarjan 强连通分量；返回大小 > 1 或自环的分量。"""
+    """Tarjan 强连通分量；仅返回多个子模块间的环，同子模块内部依赖不算环。"""
     index = {}
     lowlink = {}
     stack = []

@@ -24,6 +24,6 @@ gates:
   - tool: idf_build
     run: "idf.py set-target <target> && idf.py build && idf.py size-components（Xtensa 与 RISC-V 目标各一次）"
   - tool: idf_astyle
-    run: "pre-commit run --files <files> astyle_py（项目已配置时）"
+    run: "pre-commit run astyle_py --files <files>（项目已配置时）"
   - tool: idf_pytest
     run: "pytest --target <target> <test_apps>（pytest-embedded，需开发板）"

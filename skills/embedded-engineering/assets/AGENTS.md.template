@@ -6,8 +6,9 @@
 
 ## Profile
 
-- 本仓库 profile：`<mcu-rtos | mcu-baremetal | zephyr | linux-kernel | linux-userspace>`（多 profile 时按目录列出）
+- 本仓库 profile：`<mcu-rtos | mcu-baremetal | zephyr | esp-idf | linux-kernel | linux-userspace>`（多 profile 时按目录列出）
   - `<firmware/>` → `<mcu-rtos>`
+  - `<firmware/esp-idf/>` → `<esp-idf>`
   - `<linux/drivers/>` → `<linux-kernel>`
 - 处理嵌入式任务时加载 `embedded-engineering` 技能，并遵循其中对应 profile 的规则。
 

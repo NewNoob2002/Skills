@@ -14,7 +14,7 @@
 
 ## 为什么是“Skill + AGENTS.md + 脚本”
 
-- **Skill**：按需加载。`SKILL.md` 不到 100 行（profile 选择、角色、reference 路由表），十几页的规则只在相关任务时读取，不占每次会话的上下文。
+- **Skill**：按需加载。`SKILL.md` 当前 121 行（预算 150 行，包含 profile 选择、角色、reference 路由表），十几页的规则只在相关任务时读取，不占每次会话的上下文。
 - **AGENTS.md（项目内）**：保存这个仓库特有、必须每次都知道的事实，如芯片型号、SDK 版本、构建/测试命令、硬件授权范围。这些信息不应该写进通用技能。
 - **脚本与配置**：可以机械检查的规则（格式、命名、分层依赖）交给工具判定，而不是靠模型“记得遵守”。BARR-C 部分直接使用 Barr Group 官方 kit。
 
@@ -75,12 +75,12 @@ tools/validate_skill.json       # 每个技能的自检配置（SKILL.md 行数�
 tests/test_scripts.py           # arch_lint、detect_profile 回归测试
 tests/test_validate_skill.py    # validate_skill 变异测试（逐项注入缺陷，含 rules/profiles）与 YAML 解析测试
 tests/test_cpp.py               # cpp_cost、C++ 模板矩阵、CppUTest 模板
-tests/test_run_evals.py         # run_evals 判定语义（MATCH/MISMATCH/NOT_RUN/BLOCKED）与定义校验
+tests/test_run_evals.py         # run_evals 判定语义（变体结论与检查状态）与定义校验
 tests/cpp/                      # C++ 模板编译与负向编译检查
 install.sh                      # 安装器
 tools/run_evals.py              # 运行验证工程并对照预期：--report 生成 evals/RESULTS.md
 tools/install_eval_tools.sh     # 验证工程所需的用户级工具（west、Zephyr、FreeRTOS、ETL、CppUTest、Renode）
-evals/projects/<name>/          # 四类验证工程：good/ 已知良好样例、variants/ 故意引入问题的变体、eval.yaml 预期
+evals/projects/<name>/          # 验证工程包含三类内容：good/ 已知良好样例、variants/ 故意引入问题的变体、eval.yaml 预期
 evals/RESULTS.md                # run_evals 生成的结果（不要手改）
 evals/TRIAGE.md                 # 首次运行时预期与结果不一致的分诊记录
 evals/agent/                    # Agent 行为评测：cases.yaml 用例、RESULTS*.md 结果（runs/ 原始记录不入库）
@@ -118,11 +118,13 @@ research/                       # 来源矩阵与规范冲突分析
 
 ## 验证状态
 
+本轮（2026-11-06）复跑结构检查、pytest 和验证工程；其余 PASS 行为历史验证记录，未运行项及原因保留如下。
+
 | 项 | 结果 |
 | --- | --- |
 | `python3 tools/validate_skill.py`（技能 14 项 + README、docs/、research/ 的 6 份文档各 3 项检查，共 32 项） | PASS |
-| `python3 -m unittest discover -s tests -v`（历史验收 221 个用例；后续评测工具修复与验证见 `docs/validation-report.md` §8；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 后运行完整模板检查） | 历史验收 PASS；本轮验证见 `docs/validation-report.md` §8 |
-| `python3 tools/run_evals.py --strict`：6 个验证工程、50 个变体（6 个良好样例 + 44 个故意引入问题的变体），结果见 `evals/RESULTS.md` | PASS：50 MATCH，0 MISMATCH，0 NOT_RUN；7 个已知漏报（review 规则）均已登记 |
+| `uv run -q --with pytest --with pyyaml python -B -m pytest -q tests`（2026-11-06 本轮；设置下文的 `ETL_INCLUDE`/`CPPUTEST_PREFIX` 可运行完整模板检查） | 248 passed、2 skipped（缺少上述两个环境变量）；历史 221 用例验收见 `docs/validation-report.md` §1 |
+| `python3 tools/run_evals.py --strict`：6 个验证工程、50 个变体（6 个良好样例 + 44 个故意引入问题的变体），结果见 `evals/RESULTS.md` | 检出 37 + 已知漏报 7，另 6 个良好样例通过；43 MATCH、7 KNOWN_GAP、0 MISMATCH、0 NOT_RUN（known_gap 变体不计规则覆盖） |
 | C++ 模板：arm-none-eabi-g++ 15.3，C++17/C++20 × Cortex-M0+/M4/M7，严格告警组 `-Werror`（18 次编译） | PASS |
 | C++ 负向编译：波特率超差、不合规总线（Concept/`static_assert`）、ARMv6-M 上的无锁环形缓冲、DMA 缓冲未按 cache 行对齐 | PASS（均按预期编译失败） |
 | C++ 模板 clang-format（`assets/cpp/.clang-format`）与 clang-tidy（`assets/cpp/.clang-tidy`，含头文件） | PASS |
@@ -146,7 +148,7 @@ research/                       # 来源矩阵与规范冲突分析
 | Zephyr `check_compliance.py` 整体 | NOT_RUN：需要 Zephyr 树内的提交区间（已执行其中的 checkpatch 与 clang-format） |
 | QEMU 目标冒烟（`mcu-baremetal-c` 的 `make qemu`，mps2-an386） | PASS：链接并在 QEMU 中运行，可检出向量表入口名错误与行为缺陷（`bad-isr-name`、`bad-toggle-late`） |
 | Renode 1.17 仿真 | NOT_RUN：工具已安装，尚无基于它的验证用例 |
-| `python3 tools/run_agent_evals.py --repeat 3`：25 个用例 × 3 次 × Claude Code / Codex，评委为 omp + DeepSeek V4.1 Flash（原 Gemini 4 Argon 因区域限制不可用） | Claude 61/75（71%–89%）、Codex 63/75（74%–91%）PASS；失败项逐条复核见 `docs/validation-report.md` §4 |
+| Agent 当前定义 28 个用例；下列为历史批次：25 个用例 × 3 次 × Claude Code / Codex（每个 Agent 75 次），评委为 omp + DeepSeek V4.1 Flash（原 Gemini 4 Argon 因区域限制不可用） | 历史结果：Claude 61/75（71%–89%）、Codex 63/75（74%–91%）PASS；失败项逐条复核见 `docs/validation-report.md` §4 |
 | C++ 在目标板上的执行时间、栈水位、ISR 时延 | NOT_RUN：没有目标板；方法见 `references/verification/cpp-testing.md` §6–§7 |
 | 非 GCC 工具链（Clang 裸机、IAR、ARM Compiler 6）上的 C++ 模板与开销 | NOT_RUN：本机无对应工具链/sysroot |
 

@@ -12,7 +12,7 @@ mkdir -p "$P"
 log() { printf '\n=== %s ===\n' "$*"; }
 
 log "west（uv tool）"
-uv tool install --quiet west==1.4.0 2>/dev/null || uv tool install --quiet west
+uv tool install --quiet west==1.4.0
 west --version
 
 log "FreeRTOS-Kernel V11.3.3"

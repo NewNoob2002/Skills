@@ -1,12 +1,14 @@
 """tools/run_evals.py 回归测试：用合成的小工程覆盖判定语义与定义校验。python3 -m unittest discover -s tests -v"""
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -68,6 +70,64 @@ variants:
 
 
 class VerdictTest(RunnerTestBase):
+    def test_known_gap_is_separate_from_match_and_coverage(self):
+        text = BASE.replace('    expect: {marker: FAIL}', '    known_gap: "review only"')
+        proj = self.load(self.project(text, {"variants/bad-marker/x.txt": "1"}))
+        res = re_.run_variant(proj, "bad-marker", self.values, False)
+        self.assertEqual(res["verdict"], "KNOWN_GAP")
+        self.assertEqual(res["detected_by"], [])
+        coverage = re_.rule_coverage([proj], RULES)
+        self.assertNotIn("ARCH-001", coverage["exercised"])
+        self.assertNotIn("ARCH-001", coverage["auto_exercised"])
+
+    def test_known_gap_does_not_mask_mismatch_or_not_run(self):
+        for command, status in (("false", "MISMATCH"), ("exit 2", "NOT_RUN")):
+            with self.subTest(command=command):
+                text = BASE.replace('    expect: {marker: FAIL}', '    known_gap: "review only"')
+                text = text.replace('run: "test ! -f marker"', f'run: "{command}"\n    blocked_codes: [2]')
+                name = "demo-" + status.lower()
+                text = text.replace("project: demo", f"project: {name}")
+                proj = self.load(self.project(text, {"variants/bad-marker/x.txt": "1"}, name=name))
+                self.assertEqual(re_.run_variant(proj, "bad-marker", self.values, False)["verdict"], status)
+
+    def test_known_gap_with_expected_failure_still_matches_but_is_not_coverage(self):
+        text = BASE.replace('    expect: {marker: FAIL}',
+                            '    expect: {marker: FAIL}\n    known_gap: "partial detection only"')
+        proj = self.load(self.project(text, {"variants/bad-marker/marker": "1"}))
+        self.assertEqual(re_.run_variant(proj, "bad-marker", self.values, False)["verdict"], "MATCH")
+        self.assertNotIn("ARCH-001", re_.rule_coverage([proj], RULES)["exercised"])
+
+    def test_strict_accepts_known_gap_and_reports_it_separately(self):
+        text = BASE.replace('    expect: {marker: FAIL}', '    known_gap: "review only"')
+        self.project(text, {"variants/bad-marker/x.txt": "1"})
+        result = self.root / "result.json"
+        markdown = self.root / "result.md"
+        with patch.object(re_, "EVALS", self.root), patch.object(re_, "tool_path", return_value=self.values["_path"]):
+            self.assertEqual(re_.main(["demo", "--strict", "--json", str(result), "--report", str(markdown)]), 0)
+        self.assertEqual(json.loads(result.read_text())["summary"],
+                         {"MATCH": 1, "KNOWN_GAP": 1, "MISMATCH": 0, "NOT_RUN": 0})
+        self.assertIn("问题变体检出 0 + 已知漏报 1", markdown.read_text())
+
+    def test_failure_requires_matching_diagnostic_from_full_output(self):
+        text = BASE.replace('    run: "test ! -f marker"',
+                            '    run: "if test -f marker; then cat marker; seq 1 60; exit 1; fi"')
+        text += '    expect_output: {marker: "driver/timer[.]h: No such file"}\n'
+        proj = self.load(self.project(text, {"variants/bad-marker/marker": "driver/timer.h: No such file"}))
+        res = re_.run_variant(proj, "bad-marker", self.values, False)
+        self.assertEqual(res["verdict"], "MATCH")
+        self.assertNotIn("driver/timer.h", "\n".join(res["checks"]["marker"]["output_tail"]))
+        (proj["_path"] / "variants/bad-marker/marker").write_text("unrelated compiler error")
+        res = re_.run_variant(proj, "bad-marker", self.values, False)
+        self.assertEqual(res["verdict"], "MISMATCH")
+        self.assertEqual(res["mismatches"], ["marker"])
+        self.assertIn("diagnostic not found", res["checks"]["marker"]["reason"])
+
+    def test_timeout_cannot_satisfy_failure_diagnostic(self):
+        text = BASE.replace('    run: "test ! -f marker"', '    run: "sleep 5"\n    timeout: 0.01')
+        text += '    expect_output: {marker: "missing header"}\n'
+        proj = self.load(self.project(text, {"variants/bad-marker/marker": "1"}))
+        self.assertEqual(re_.run_variant(proj, "bad-marker", self.values, False)["verdict"], "MISMATCH")
+
     def test_match_for_good_and_detected_bad(self):
         proj = self.load(self.project(BASE, {"variants/bad-marker/marker": "1"}))
         self.assertEqual(re_.run_variant(proj, "good", self.values, False)["verdict"], "MATCH")
@@ -150,6 +210,19 @@ class VerdictTest(RunnerTestBase):
 
 
 class DefinitionTest(RunnerTestBase):
+    def test_invalid_output_expectations_are_definition_errors(self):
+        for expectation in ("[]", '{other: "missing header"}', '{marker: "["}', '{marker: ""}',
+                            '{marker: 12}'):
+            with self.subTest(expectation=expectation):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "demo"
+                    (path / "good").mkdir(parents=True)
+                    (path / "variants/bad-marker").mkdir(parents=True)
+                    (path / "eval.yaml").write_text(BASE + f"    expect_output: {expectation}\n")
+                    with self.assertRaises(re_.DefinitionError) as ctx:
+                        self.load(path)
+                    self.assertIn("expect_output", str(ctx.exception))
+
     def assert_definition_error(self, text, fragment, files=None):
         path = self.project(text, files if files is not None else {"variants/bad-marker/marker": "1"})
         with self.assertRaises(re_.DefinitionError) as ctx:

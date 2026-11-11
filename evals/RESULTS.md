@@ -1,8 +1,9 @@
 # 验证工程运行结果
 
-生成时间：2026-11-06 17:46:14；技能提交：`c269896-dirty`。本文件由 `tools/run_evals.py` 生成，不要手改。
+生成时间：2026-11-06 19:25:13；技能提交：`fa6f054-dirty`。本文件由 `tools/run_evals.py` 生成，不要手改。
 
-变体结论：MATCH 50，MISMATCH 0，NOT_RUN 0。
+变体结论：MATCH 43，KNOWN_GAP 7，MISMATCH 0，NOT_RUN 0。
+良好样例通过 6；问题变体检出 37 + 已知漏报 7。
 
 ## esp-idf-app（profile `esp-idf`）
 
@@ -15,8 +16,8 @@
 | `bad-xtensa-only` | `ESP-008` | MATCH | PASS | FAIL | PASS | BLOCKED | PASS |
 | `bad-legacy-driver` | `ESP-009` | MATCH | FAIL | FAIL | BLOCKED | BLOCKED | PASS |
 | `bad-no-length-check` | `PROTO-001` | MATCH | PASS | PASS | PASS | PASS | FAIL |
-| `bad-disable-interrupts` | `ESP-001` | MATCH | PASS | PASS | PASS | PASS | PASS |
-| `bad-error-check-abort` | `ESP-004` | MATCH | PASS | PASS | PASS | PASS | PASS |
+| `bad-disable-interrupts` | `ESP-001` | KNOWN_GAP | PASS | PASS | PASS | PASS | PASS |
+| `bad-error-check-abort` | `ESP-004` | KNOWN_GAP | PASS | PASS | PASS | PASS | PASS |
 
 已知漏报（自动检查不能发现，需 review 或 test 补足）：
 
@@ -64,8 +65,8 @@ ACME 帧接收 platform 驱动（devm、线程化中断、spinlock、dev_err_pro
 | `bad-volatile-mmio` | `LNXK-004` | MATCH | PASS | FAIL | PASS |
 | `bad-binding-no-additional` | `LNXK-008` | MATCH | PASS | PASS | FAIL |
 | `bad-binding-example` | `LNXK-008` | MATCH | PASS | PASS | FAIL |
-| `bad-hungarian` | `LNXK-002` | MATCH | PASS | PASS | PASS |
-| `bad-sleep-in-hardirq` | `LNXK-006` | MATCH | PASS | PASS | PASS |
+| `bad-hungarian` | `LNXK-002` | KNOWN_GAP | PASS | PASS | PASS |
+| `bad-sleep-in-hardirq` | `LNXK-006` | KNOWN_GAP | PASS | PASS | PASS |
 
 已知漏报（自动检查不能发现，需 review 或 test 补足）：
 
@@ -84,7 +85,7 @@ ACME 帧接收 platform 驱动（devm、线程化中断、spinlock、dev_err_pro
 | `bad-unchecked-fsync` | `LNXU-001`, `LNXU-002` | MATCH | PASS | PASS | FAIL |
 | `bad-nonatomic-save` | `LNXU-002` | MATCH | PASS | PASS | FAIL |
 | `bad-name-overflow` | `GEN-010` | MATCH | PASS | PASS | FAIL |
-| `bad-signal-printf` | `LNXU-004` | MATCH | PASS | PASS | PASS |
+| `bad-signal-printf` | `LNXU-004` | KNOWN_GAP | PASS | PASS | PASS |
 
 已知漏报（自动检查不能发现，需 review 或 test 补足）：
 
@@ -104,7 +105,7 @@ ACME 帧接收 platform 驱动（devm、线程化中断、spinlock、dev_err_pro
 | `bad-missing-braces` | `CFMT-002` | MATCH | PASS | FAIL | PASS | PASS | PASS | PASS |
 | `bad-toggle-late` | 缺陷：ledctl_tick 用 > 代替 >=，LED 晚一个节拍翻转 | MATCH | PASS | PASS | PASS | PASS | FAIL | FAIL |
 | `bad-isr-name` | 缺陷：SysTick 中断入口名写成 Systick_Handler，与向量表不符，中断落到弱符号默认处理函数 | MATCH | PASS | PASS | PASS | PASS | FAIL | PASS |
-| `bad-isr-heavy` | `ISR-001` | MATCH | PASS | PASS | PASS | PASS | PASS | PASS |
+| `bad-isr-heavy` | `ISR-001` | KNOWN_GAP | PASS | PASS | PASS | PASS | PASS | PASS |
 
 已知漏报（自动检查不能发现，需 review 或 test 补足）：
 
@@ -121,7 +122,7 @@ ACME 帧接收 platform 驱动（devm、线程化中断、spinlock、dev_err_pro
 | `bad-no-braces` | `ZEP-001` | MATCH | FAIL | FAIL | PASS |
 | `bad-no-length-check` | `PROTO-001` | MATCH | PASS | PASS | FAIL |
 | `bad-checksum-ignored` | 缺陷：解析器不比较校验和 | MATCH | PASS | PASS | FAIL |
-| `bad-no-device-ready` | `ZEP-004` | MATCH | PASS | PASS | PASS |
+| `bad-no-device-ready` | `ZEP-004` | KNOWN_GAP | PASS | PASS | PASS |
 
 已知漏报（自动检查不能发现，需 review 或 test 补足）：
 

@@ -39,10 +39,8 @@ static void test_bad_sof(void)
 
 static void test_oversized_length_rejected(void)
 {
-    // 长度字段 200 超过上限：即使缓冲区足够大也必须拒绝，不能写越界
-    static uint8_t buf[203];
-    buf[0] = FRAME_PARSER_SOF;
-    buf[1] = 200U;
+    // 超长字段配错误校验和：缺长度检查的变体在拷贝前返回 CRC 错误，断言失败原因确定且不越界。
+    const uint8_t buf[FRAME_PARSER_MAX_PAYLOAD + 4U] = {FRAME_PARSER_SOF, FRAME_PARSER_MAX_PAYLOAD + 1U};
     frame_parser_frame_t out;
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, frame_parser_parse(buf, sizeof(buf), &out));
 }

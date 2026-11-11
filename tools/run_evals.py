@@ -12,6 +12,7 @@
 检查状态：PASS / FAIL / NOT_RUN（缺少工具或外部依赖）/ BLOCKED（依赖的检查未通过，或工具自身报告配置错误）。
 变体结论：MATCH（所有已执行的检查都符合预期，且没有未执行的检查）/ MISMATCH（至少一项与预期不符）/
 NOT_RUN（没有不符，但有检查未执行，因而不能确认）。NOT_RUN 不是通过。
+KNOWN_GAP（已登记漏报且无预期 FAIL，检查均符合预期）；单列统计，--strict 不视为失败。
 
 退出码：0 没有 MISMATCH（--strict 时还要求没有 NOT_RUN）；1 有 MISMATCH；2 定义错误或用法错误。
 外部依赖目录默认 ~/.local/share/embedded-eval（可用 --prefix 或 EMBEDDED_EVAL_PREFIX 覆盖）。
@@ -23,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -41,9 +43,9 @@ EVALS = REPO / "evals" / "projects"
 RULES = SKILL / "standards" / "rules.yaml"
 
 PASS, FAIL, NOT_RUN, BLOCKED = "PASS", "FAIL", "NOT_RUN", "BLOCKED"
-MATCH, MISMATCH = "MATCH", "MISMATCH"
+MATCH, MISMATCH, KNOWN_GAP = "MATCH", "MISMATCH", "KNOWN_GAP"
 CHECK_KEYS = {"run", "requires", "needs", "pass_codes", "blocked_codes", "timeout", "rules", "env"}
-VARIANT_KEYS = {"violates", "defect", "expect", "known_gap", "remove", "note"}
+VARIANT_KEYS = {"violates", "defect", "expect", "expect_output", "known_gap", "remove", "note"}
 TOP_KEYS = {"project", "profile", "summary", "setup", "checks", "variants"}
 OUTPUT_TAIL = 40
 
@@ -119,6 +121,17 @@ def load_project(path: Path, rules: dict[str, dict]) -> dict:
             if status == BLOCKED and not checks[cid].get("needs"):
                 # 只有依赖其他检查的检查才可能被预期阻塞（依赖项按预期失败时）
                 raise DefinitionError(f"{where}: variant {name}: expect.{cid} BLOCKED requires the check to have needs")
+        output_patterns = var.get("expect_output", {})
+        if not isinstance(output_patterns, dict):
+            raise DefinitionError(f"{where}: variant {name}: expect_output must be a mapping")
+        for cid, pattern in output_patterns.items():
+            if expect.get(cid) != FAIL or not isinstance(pattern, str) or not pattern.strip():
+                raise DefinitionError(f"{where}: variant {name}: expect_output.{cid} requires an expected FAIL "
+                                      "and a non-empty regex")
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise DefinitionError(f"{where}: variant {name}: expect_output.{cid}: {exc}") from exc
         violates = var.get("violates") or []
         for rid in violates:
             if rid not in rules:
@@ -192,7 +205,8 @@ def materialize(project: dict, name: str, dest: Path, values: dict[str, str]) ->
         shutil.copy2(src, dest / dst)
 
 
-def run_check(spec: dict, cwd: Path, values: dict[str, str], results: dict[str, dict]) -> dict:
+def run_check(spec: dict, cwd: Path, values: dict[str, str], results: dict[str, dict],
+              output_pattern: str | None = None) -> dict:
     missing = missing_requirements(spec, values)
     if missing:
         return {"status": NOT_RUN, "reason": "missing: " + ", ".join(missing)}
@@ -210,7 +224,7 @@ def run_check(spec: dict, cwd: Path, values: dict[str, str], results: dict[str, 
     except subprocess.TimeoutExpired:
         # 超时视为失败：被测程序挂起（例如 RTOS 测试死锁）本身就是缺陷
         return {"status": FAIL, "reason": f"timeout after {spec.get('timeout', 600)} s", "command": command}
-    output = (proc.stdout + proc.stderr).strip().splitlines()
+    output = proc.stdout + proc.stderr
     code = proc.returncode
     if code in spec.get("pass_codes", [0]):
         status = PASS
@@ -218,8 +232,12 @@ def run_check(spec: dict, cwd: Path, values: dict[str, str], results: dict[str, 
         status = BLOCKED
     else:
         status = FAIL
-    return {"status": status, "exit_code": code, "seconds": round(time.monotonic() - start, 1),
-            "command": command, "output_tail": output[-OUTPUT_TAIL:]}
+    result = {"status": status, "exit_code": code, "seconds": round(time.monotonic() - start, 1),
+              "command": command, "output_tail": output.strip().splitlines()[-OUTPUT_TAIL:]}
+    if output_pattern is not None:
+        # 匹配完整输出，避免较早的编译诊断被日志尾部截断。
+        result["output_matches"] = re.search(output_pattern, output) is not None
+    return result
 
 
 def run_variant(project: dict, name: str, values: dict[str, str], keep: bool) -> dict:
@@ -229,7 +247,8 @@ def run_variant(project: dict, name: str, values: dict[str, str], keep: bool) ->
         materialize(project, name, tmp / "work", values)
         results: dict[str, dict] = {}
         for cid, spec in project["checks"].items():
-            results[cid] = run_check(spec, tmp / "work", values, results)
+            results[cid] = run_check(spec, tmp / "work", values, results,
+                                     var.get("expect_output", {}).get(cid))
     finally:
         if not keep:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -239,12 +258,18 @@ def run_variant(project: dict, name: str, values: dict[str, str], keep: bool) ->
         want = expect.get(cid, PASS)
         res["expected"] = want
         if res["status"] == want:
+            pattern = var.get("expect_output", {}).get(cid)
+            if pattern is not None and not res.get("output_matches", False):
+                mismatches.append(cid)
+                res["reason"] = f"expected failure diagnostic not found: {pattern}"
             continue
         if res["status"] in (NOT_RUN, BLOCKED):
             unverified.append(cid)
         else:
             mismatches.append(cid)
     verdict = MISMATCH if mismatches else (NOT_RUN if unverified else MATCH)
+    if verdict == MATCH and var.get("known_gap") and not expected_failures(expect):
+        verdict = KNOWN_GAP
     detected = [cid for cid, res in results.items() if res["status"] == FAIL]
     return {"variant": name, "violates": var.get("violates") or [], "defect": var.get("defect"),
             "known_gap": var.get("known_gap"),
@@ -256,6 +281,8 @@ def rule_coverage(projects: list[dict], rules: dict[str, dict]) -> dict:
     exercised: dict[str, list[str]] = {}
     for proj in projects:
         for name, var in proj["variants"].items():
+            if var.get("known_gap"):
+                continue
             for rid in var.get("violates") or []:
                 exercised.setdefault(rid, []).append(f"{proj['project']}/{name}")
     auto = {rid for rid, r in rules.items() if r["verify"]["method"] == "auto"}
@@ -269,7 +296,12 @@ def render_markdown(report: dict) -> str:
     lines = ["# 验证工程运行结果", "",
              f"生成时间：{report['generated']}；技能提交：`{report['commit']}`。本文件由 `tools/run_evals.py` 生成，不要手改。", ""]
     s = report["summary"]
-    lines += [f"变体结论：MATCH {s[MATCH]}，MISMATCH {s[MISMATCH]}，NOT_RUN {s[NOT_RUN]}。", ""]
+    detected = sum(bool(v["detected_by"]) and v["verdict"] == MATCH
+                   for p in report["projects"] for v in p["results"])
+    good = sum(v["variant"] == "good" and v["verdict"] == MATCH
+               for p in report["projects"] for v in p["results"])
+    lines += [f"变体结论：MATCH {s[MATCH]}，KNOWN_GAP {s[KNOWN_GAP]}，MISMATCH {s[MISMATCH]}，NOT_RUN {s[NOT_RUN]}。",
+              f"良好样例通过 {good}；问题变体检出 {detected} + 已知漏报 {s[KNOWN_GAP]}。", ""]
     for proj in report["projects"]:
         lines += [f"## {proj['project']}（profile `{proj['profile']}`）", "", proj.get("summary", ""), ""]
         cids = list(proj["checks"])
@@ -295,6 +327,10 @@ def render_markdown(report: dict) -> str:
         if reasons:
             lines += ["", "未执行的检查：", ""]
             lines += [f"- `{cid}`：{reason}" for cid, reason in sorted(reasons, key=str)]
+        for var in proj["results"]:
+            for cid in var["mismatches"]:
+                if reason := var["checks"][cid].get("reason"):
+                    lines += ["", f"- `{var['variant']}/{cid}`：{reason}"]
         lines.append("")
     cov = report["rule_coverage"]
     lines += ["## 规则覆盖", "",
@@ -349,7 +385,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     report = {"generated": time.strftime("%Y-%m-%d %H:%M:%S"), "commit": git_commit(),
-              "prefix": values["prefix"], "projects": [], "summary": {MATCH: 0, MISMATCH: 0, NOT_RUN: 0}}
+              "prefix": values["prefix"], "projects": [],
+              "summary": {MATCH: 0, KNOWN_GAP: 0, MISMATCH: 0, NOT_RUN: 0}}
     for proj in projects:
         results = []
         for name in proj["variants"]:
@@ -367,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.report:
         args.report.write_text(render_markdown(report), encoding="utf-8")
     s = report["summary"]
-    print(f"summary: {s[MATCH]} MATCH, {s[MISMATCH]} MISMATCH, {s[NOT_RUN]} NOT_RUN")
+    print(f"summary: {s[MATCH]} MATCH, {s[KNOWN_GAP]} KNOWN_GAP, {s[MISMATCH]} MISMATCH, {s[NOT_RUN]} NOT_RUN")
     if s[MISMATCH] or (args.strict and s[NOT_RUN]):
         return 1
     return 0
