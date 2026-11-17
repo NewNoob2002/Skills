@@ -12,10 +12,14 @@ variables:
 
 static:
   stage: static
-  image: <registry>/firmware-tools:<tag>   # 需包含 python3、clang-format、clang-tidy
+  image: <registry>/firmware-tools@sha256:<digest> # LLVM 23，门禁校验版本
   script:
+    - cmake --preset <analysis-preset> -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
     - python3 "$SKILL_DIR/scripts/arch_lint.py" .
-    - sh "$SKILL_DIR/scripts/barrc/check.sh" $(git ls-files 'app/*.[ch]' 'module/*.[ch]' 'interface/*.[ch]' 'driver/*.[ch]' 'bsp/*.[ch]')
+    # 同 GitHub：显式按 C/C++ 分流，空范围不调用全仓 BARR-C。
+    - >-
+      python3 "$SKILL_DIR/scripts/style_gate.py"
+      --root . --manifest style-gate.json
 
 host-tests:
   stage: test
@@ -25,6 +29,7 @@ host-tests:
     - ceedling test:all
     - cmake -S <tests/cpp> -B build-host && cmake --build build-host && ctest --test-dir build-host --output-on-failure
 
+# 仅 MCU 固件选择此 job；Linux 用户态沿用自身构建，不套 T1/链接裁剪门禁。
 target-build:
   stage: build
   image: <registry>/arm-gcc:<version>

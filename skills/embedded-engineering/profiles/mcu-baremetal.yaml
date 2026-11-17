@@ -35,3 +35,5 @@ gates:
     run: "ceedling test:all（含 C 时）"
   - tool: cpputest
     run: "ctest --test-dir build-host --output-on-failure（含 C++ 时）"
+  - tool: style_gate
+    run: "python3 <skill>/scripts/style_gate.py --root <repo> --manifest <style-gate.json>（仅显式 C++ 范围；未启用时 NOT_RUN）"

@@ -1,5 +1,7 @@
 # embedded-engineering：嵌入式 C/C++ 开发 Agent 技能
 
+当前版本：**v0.1**（`skills/embedded-engineering/SKILL.md` 的 `metadata.version`）。
+
 把以下来源合成为**一个**可安装的 Agent Skill（agentskills.io 格式，Claude Code / Codex / Grok Build / Hermes 等通用），外加一份放进固件仓库、每次会话都会加载的 `AGENTS.md` 模板：
 
 | 层 | 来源 | 在技能中的位置 |
@@ -14,7 +16,7 @@
 
 ## 为什么是“Skill + AGENTS.md + 脚本”
 
-- **Skill**：按需加载。`SKILL.md` 当前 121 行（预算 150 行，包含 profile 选择、角色、reference 路由表），十几页的规则只在相关任务时读取，不占每次会话的上下文。
+- **Skill**：按需加载。`SKILL.md` 当前 128 行（预算 150 行，包含 profile 选择、角色、reference 路由表），十几页的规则只在相关任务时读取，不占每次会话的上下文。
 - **AGENTS.md（项目内）**：保存这个仓库特有、必须每次都知道的事实，如芯片型号、SDK 版本、构建/测试命令、硬件授权范围。这些信息不应该写进通用技能。
 - **脚本与配置**：可以机械检查的规则（格式、命名、分层依赖）交给工具判定，而不是靠模型“记得遵守”。BARR-C 部分直接使用 Barr Group 官方 kit。
 
@@ -32,7 +34,7 @@ C++ 部分不简单禁止现代特性，而是按资源等级（T0 极小 MCU �
 已确定的方案：
 
 - 语言标准：C++17 基线，C++20 可选。
-- 格式：C++ 沿用 BARR-C 布局，列宽 100；命名按 Core Guidelines（命名空间代替模块前缀，不用 `p_`/`b_` 类型前缀）。
+- 格式默认方案 A：自有 MCU C++ 沿用 BARR-C 布局，列宽 100；命名空间代替模块前缀，不用 `p_`/`b_` 类型前缀。既有项目/平台配置优先。可另行显式选择 [readable-cpp](skills/embedded-engineering/references/cpp/readable-cpp.md)，其函数花括号换行、控制花括号同行、方法和局部变量 lowerCamelCase，不改变 profile 或资源等级。
 - 默认工具库：ETL。
 - C++ 单元测试：CppUTest。
 
@@ -41,7 +43,7 @@ C++ 部分不简单禁止现代特性，而是按资源等级（T0 极小 MCU �
 ```text
 skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此目录）
 ├── SKILL.md                    # 入口：护栏、profile、角色、路由
-├── standards/rules.yaml        # 132 条带 ID 的规则：适用 profile、等级、验证方法与覆盖范围、出处章节、冲突
+├── standards/rules.yaml        # 135 条带 ID 的规则：适用 profile、等级、验证方法与覆盖范围、出处章节、冲突
 ├── profiles/*.yaml            # 每个 profile 的规范、测试基线、门禁命令（与 rules.yaml 声明一一对应）
 ├── references/                 # 按需读取的规则
 │   ├── profiles.md             #   profile 判定与冲突裁决
@@ -58,7 +60,8 @@ skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此�
 │   ├── arch_lint.py            # 分层依赖/HAL/寄存器访问检查（C 与 C++）
 │   ├── cpp_cost.py             # ELF 门禁：按等级禁止的运行时符号、段预算、A/B 增量
 │   ├── bench/                  # C++ 特性开销微基准（在你的工具链上复现）
-│   └── barrc/check.sh          # Barr Group 官方 BARR-C:2018 门禁（原样）
+│   ├── style_gate.py           # 显式 C/C++ 范围、布局/命名、默认 Doxygen 块存在性
+│   └── barrc/check.sh          # Barr Group 官方 BARR-C:2018 门禁封装
 ├── assets/
 │   ├── AGENTS.md.template      # 固件仓库的常驻规则模板
 │   ├── arch_layers.json        # arch_lint 默认层规则
@@ -67,6 +70,7 @@ skills/embedded-engineering/    # 唯一可安装单元（install.sh 复制此�
 │   ├── templates/              # 符合 BARR-C 的 C interface/module/test 示例
 │   ├── ci/                     # GitHub Actions / GitLab CI 模板（构建、静态检查、host 测试）
 │   └── cpp/                    # C++：.clang-format/.clang-tidy、编译选项、linker_discard.ld、
+│       ├── readable-cpp/       #   显式可选配置与正反例；abi/ 为 C 调用 C++ 的共享头样例
 │       └── templates/          #   驱动/总线/RAII/ISR 队列/DMA/组合根/CppUTest 模板
 ├── agents/openai.yaml          # Codex 显示元数据
 └── THIRD_PARTY_NOTICES.md
@@ -74,6 +78,8 @@ tools/validate_skill.py         # Skill 自检：frontmatter、链接/路径/§ 
 tools/validate_skill.json       # 每个技能的自检配置（SKILL.md 行数预算、外部源码树路径白名单）
 tests/test_scripts.py           # arch_lint、detect_profile 回归测试
 tests/test_validate_skill.py    # validate_skill 变异测试（逐项注入缺陷，含 rules/profiles）与 YAML 解析测试
+tests/test_readable_cpp.py      # G474 混编 / RK3588 SocketCAN+epoll 临时主机工程与失败诊断
+tests/test_heap_guard.py        # C++17/20 分配入口运行边界和 ARM 导出符号检查
 tests/test_cpp.py               # cpp_cost、C++ 模板矩阵、CppUTest 模板
 tests/test_run_evals.py         # run_evals 判定语义（变体结论与检查状态）与定义校验
 tests/cpp/                      # C++ 模板编译与负向编译检查
@@ -106,6 +112,20 @@ research/                       # 来源矩阵与规范冲突分析
 
 ## 使用示例
 
+仅在现有的自有 C++ 目录显式安装风格；不会替换该目录及项目根内祖先的已有配置，`--overwrite` 也不覆盖它们：
+
+```sh
+./install.sh --agent codex --scope project --project-dir ~/work/fw \
+  --cpp-style readable-cpp --cpp-dir app_cpp
+# 保持原 C++ 方案时使用 --cpp-style default-cpp
+```
+
+按 [清单示例](skills/embedded-engineering/references/cpp/readable-cpp.md) 创建 `style-gate.json`，然后用 `python3 skills/embedded-engineering/scripts/style_gate.py --root /path/to/project --manifest /path/to/project/style-gate.json` 执行。GitHub/GitLab 模板使用同一门禁，要求真实 `compile_commands.json`、显式文件范围和校验工具主版本；空范围不扩大到全仓。`.h` 由契约和清单分类，C API 仍按平台 C 规则。Zephyr/ESP-IDF 保留平台门禁，Linux 不继承 MCU 运行时/链接约束。
+
+[可选应用结构参考](skills/embedded-engineering/references/architecture/ui-application.md) 用原创背光例子说明页面、业务服务与硬件适配。默认规则要求所有新增自有 C/C++ 函数/方法有 Doxygen（声明或定义择一；类注释不能替代；默认英文，项目可指定语言）；工具只检查块是否存在，英文和语义由人评审。遗留/第三方/生成代码不选入门禁；显式关闭须记录原因。
+
+可直接构建的 readable-cpp 分层示例见 [examples/g474-backlight](examples/g474-backlight/)：C ABI 入口、页面、业务服务、端口和假适配器分层，附主机测试与 `style-gate.json`；目标板运行仍为 `NOT_RUN`。
+
 ```text
 用 embedded-engineering 对 firmware/ 做一次架构评审，停在批准门。
 给 module/motor 加一个过流保护，按 BARR-C 写，补 Ceedling 测试。
@@ -118,7 +138,9 @@ research/                       # 来源矩阵与规范冲突分析
 
 ## 验证状态
 
-本轮（2026-11-06）复跑结构检查、pytest 和验证工程；其余 PASS 行为历史验证记录，未运行项及原因保留如下。
+最新增量验证为 **2026-11-17**，对象为 `5cae6d9b5fdbec57222016c80de2701db020bbc9` 上的本轮工作树：结构 32 项 PASS；完整 Python 回归 268 passed、178 subtests passed、无跳过；三项工程 27 个变体为 25 MATCH、2 KNOWN_GAP、0 MISMATCH/NOT_RUN；真实临时写入 Agent、G474 混编主机运行和 Cortex-M4 ABI 编译链接、RK3588 风格 Linux 主机工程、可构建的 readable-cpp 分层示例均通过。逐函数 Doxygen 已改为默认规则，`test_doxygen_defaults_to_enabled` 同时验证 C/C++ 缺失诊断和显式关闭；完整命令、版本、预期失败诊断和未执行项见 [本轮独立报告](docs/evidence/readable-cpp-2026-11-17.md)。目标 MCU/RK3588 板上运行和 GitHub/GitLab 托管 CI 为 NOT_RUN。
+
+下表保留 **2026-11-06 及更早的历史记录**；这些历史 PASS 不代表本轮重跑，不能与新增证据混用。
 
 | 项 | 结果 |
 | --- | --- |

@@ -1,13 +1,13 @@
 # 验证报告
 
-首版日期：2026-11-05；最后更新：2026-11-06。本报告汇总全部验证层的**实际运行结果**；未执行的项目写明 NOT_RUN 及原因。逐项明细见各层生成的结果文件：
+首版日期：2026-11-05；历史汇总更新：2026-11-06；最新增量验证：2026-11-17，见 [readable-cpp 与边界修复证据](evidence/readable-cpp-2026-11-17.md)。历史章节与生成结果保持原样。本报告汇总全部验证层的**实际运行结果**；未执行的项目写明 NOT_RUN 及原因。逐项明细见各层生成的结果文件：
 
 - 验证工程：[../evals/RESULTS.md](../evals/RESULTS.md)（`tools/run_evals.py` 生成）
 - 运行不一致的分诊记录：[../evals/TRIAGE.md](../evals/TRIAGE.md)（三轮）
 - Agent 行为评测：[../evals/agent/RESULTS.md](../evals/agent/RESULTS.md)（`tools/run_agent_evals.py` 生成）
 - 工程预期的独立复核：[independent-review.md](independent-review.md)
 
-当前结构基线（2026-11-06，`fa6f054` 后工作树修复）：32 项结构检查；132 条规则，其中 47 条 auto（2 条 full、45 条 partial）；6 个验证工程、50 个变体；Agent 定义 28 个用例。§1–§9 均为历史运行记录，数值与提交只描述当时对象，不能作为当前工作树的独立回归证据；当前验证工程结果以生成的 `evals/RESULTS.md` 为准。
+历史结构基线（2026-11-06，`fa6f054` 后工作树修复）：32 项结构检查；132 条规则，其中 47 条 auto（2 条 full、45 条 partial）；6 个验证工程、50 个变体；Agent 定义 28 个用例。§1–§9 均为历史运行记录，数值与提交只描述当时对象，不能作为当前工作树的独立回归证据；当前验证工程结果以生成的 `evals/RESULTS.md` 为准。
 
 ## 1. 历史结论（efb394b）
 
@@ -313,3 +313,17 @@ Claude E02 唯一一次失败**没有加载技能**：回答给出了标注“�
 G17：legacy 驱动变体必须匹配 `fatal error: driver/timer.h: No such file or directory`，任意其他构建失败不再算检出。超长帧测试故意给出错误校验和，使缺长度检查的变体在拷贝前返回 CRC 错误，由 Unity 对长度错误返回码的断言稳定检出。IRAM 检查仍仅确认 ISR 符号所在段，未证明整条调用链和数据都在 IRAM/DRAM；ESP-002 保持 review 规则。没有开发板，不运行烧录、eFuse 或目标时序测试；本轮未重跑 Agent 行为评测。
 
 环境说明：首次全工程执行在沙箱中得到 33 MATCH、3 KNOWN_GAP、14 MISMATCH；诊断分别为 uv 缓存只读、Twister socket 权限限制和 LeakSanitizer 不支持 ptrace。经运行时审批在沙箱外以相同命令完整重跑后通过，未修改预期或关闭检查来消除这些失败。
+
+## 12. 逐函数 Doxygen 默认化（2026-11-17）
+
+对象：`5cae6d9b5fdbec57222016c80de2701db020bbc9` 上的未提交工作树；审计前已有的改动保留，未 reset/stash/commit/push，未修改其他固件仓库，未做烧录或实机操作。
+
+`DOC-001` 改为默认强制：新增自有 C/C++ 函数与方法（含私有、构造、析构、模板、重载）必须有 Doxygen，声明或定义择一，类级注释不替代；默认英文，项目可在 `AGENTS.md` 覆盖语言。`style_gate.py` 的 `doxygen` 默认 `true`，显式 `false` 只用于遗留基线、第三方或生成代码并须记录原因。同步更新 `SKILL.md`、`rules.yaml`、`coding.md`、`barr-c.md`、`readable-cpp.md`、`profiles.md`、`review-checklist.md`、`AGENTS.md.template` 与 README。
+
+本轮实测：
+- 结构：`python3 -B tools/validate_skill.py` → 32 PASS、0 FAIL、0 NOT_RUN、0 BLOCKED。
+- 新增回归：`test_doxygen_defaults_to_enabled` 在不写 `doxygen` 键时分别让 C++ 方法与 C `main` 缺文档，均按预期触发 `DOC-001`；显式 `doxygen:false` 后同一工程通过。
+- readable-cpp 用例：`python3 -B -m unittest tests.test_readable_cpp -v` → 8 项通过。
+- 完整回归：设置 ETL 与 CppUTest 路径后 `python3 -B -m unittest discover -s tests -v` → 268 项通过、0 跳过（142.305s）。命令、工具链版本和未执行项见 [readable-cpp 证据](evidence/readable-cpp-2026-11-17.md) §7。
+
+未执行：目标 MCU/RK3588 板上运行、真实 CAN 收发、托管 CI；自动检查只证明文档块存在，英文与接口语义仍由评审确认。历史章节数值保持原样，未覆盖。

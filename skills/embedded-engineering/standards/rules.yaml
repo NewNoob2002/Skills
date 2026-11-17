@@ -65,6 +65,8 @@ verify_tools:
   cpp_cost:
     path: scripts/cpp_cost.py
     checks: [exceptions, rtti, heap, static_dtor, local_static_guard, throw_helpers, stdio_format, iostream, atomic_libcall, budget, diff]
+  style_gate:
+    path: scripts/style_gate.py
   clang_tidy_cpp:
     path: assets/cpp/.clang-tidy
   negative_compile:
@@ -90,6 +92,48 @@ verify_tools:
     external: "-fsanitize=address,undefined 的 host 构建"
 
 rules:
+  - id: CPPF-001
+    title: "C++ 布局按所选项目/平台风格；readable-cpp 的 4 空格、100 列目标、函数换行/控制体同行与括号规则仅显式启用"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf, linux-userspace]
+    lang: [cpp]
+    source: [skill]
+    ref: references/cpp/readable-cpp.md §1
+    when: "项目或指定自有 C++ 目录显式选择；已有配置与上游贡献规范优先；不触及第三方、生成代码、SDK"
+    verify:
+      method: auto
+      tool: style_gate
+      coverage: partial
+      gap: "clang-format 检查可表达的布局；列宽是目标，宏/不可断字符串与独立头包含需人工或编译审查"
+
+  - id: CPPF-002
+    title: "C++ 命名按所选风格，clang-tidy 使用真实编译数据库与校验版本；readable-cpp 按 PascalCase/lowerCamelCase/私有后缀_/k 常量"
+    level: mandatory
+    profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf, linux-userspace]
+    lang: [cpp]
+    source: [skill]
+    ref: references/cpp/readable-cpp.md §2
+    when: "与 CPPF-001 同一显式范围；C API 保持对应平台 C 规范"
+    verify:
+      method: auto
+      tool: style_gate
+      coverage: partial
+      gap: "未编译分支、宏、模板依赖名、C ABI 豁免理由与命名语义需人工审查"
+
+  - id: DOC-001
+    title: "默认规则：所有新增自有 C/C++ 函数与方法有 Doxygen（默认英文），声明或定义择一；类级说明不替代"
+    level: mandatory
+    profiles: [all]
+    lang: [c, cpp]
+    source: [skill]
+    ref: references/cpp/readable-cpp.md §3
+    when: "默认启用；仅检查 style-gate 清单显式选择的自有范围；第三方、生成代码、遗留基线通过不选入或显式 doxygen:false 排除"
+    verify:
+      method: auto
+      tool: style_gate
+      coverage: partial
+      gap: "AST 仅检查关联文档块存在；英文、参数/返回/错误/上下文/所有权语义、重复、宏、未编译分支和未触达头需评审"
+
   # ---------------------------------------------------------------- GEN：全 profile 的护栏与流程
   - id: GEN-001
     title: "flash、擦除、eFuse/OTP、option bytes、secure boot、驱动执行器或电源前，必须取得覆盖目标与影响范围的明确授权并说明恢复路径"

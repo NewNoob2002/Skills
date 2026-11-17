@@ -12,6 +12,8 @@ description: >-
   嵌入式 C/C++（含 ESP-IDF）固件与驱动设计、编写、审查、重构、测试及调试；HardFault/故障寄存器分析、bootloader/OTA 升级与掉电安全、
   Ceedling/CppUTest 主机测试；也用于 FreeRTOS 中断安全调用、ThreadX 优先级换算、Zephyr 设备就绪与驱动缓冲区分配、
   烧录/RDP 安全、上游 DCO/AI 署名等知识问答。
+metadata:
+  version: "v0.1"
 ---
 
 # Embedded Engineering Baseline
@@ -41,7 +43,9 @@ description: >-
 
 **规则库**：[standards/rules.yaml](standards/rules.yaml) 收录可机械检查、跨生态冲突或需要按 ID 引用的规则（`GEN`、`ARCH`、`C`、`CFMT`、`ISR`、`RTOS`、`DMA`、`CPP`、`ZEP`、`ESP`、`LNXK`、`LNXU`、`TEST`），每条给出适用 profile、强制等级、验证方法和出处章节。某 profile 适用的规则 = `profiles` 含该 profile 或 `all`，且 `when` 条件成立的条目（无 `when` 视为成立）；每个 profile 文件（上表第一列链接）列出该 profile 的规范、测试基线和门禁命令。规则细节以 `ref` 指向的 reference 为准。
 
-**语言**：`.c/.h` 按上表的 C 规范；`.cpp/.hpp` 按 [cpp/coding.md](references/cpp/coding.md)，并按资源等级 T0–T3 取舍特性（[cpp/features.md](references/cpp/features.md)）。等级由 `detect_profile.py` 的 `resource_tier` 给出建议，需对照芯片资源确认。`linux-kernel` 不引入 C++；Zephyr 只在应用层使用 C++，内核、驱动、系统初始化保持 C。测试框架按 profile 与语言选择（见上表）：`mcu-*` 与 `linux-userspace` 的 C 用 Ceedling、C++ 用 CppUTest；`zephyr` 以 ztest + Twister 为准，只有不依赖 Zephyr API 的纯逻辑可额外做 host 测试；`linux-kernel` 用 KUnit/kselftest。
+**语言**：`.c` 按平台 C 规范，`.cpp/.cc/.cxx` 按 [cpp/coding.md](references/cpp/coding.md)；`.h` 按契约分类，共享 ABI 头只含 C 构造并保护 C++ linkage。profile、T0–T3 与风格独立选择：现有项目/平台风格优先，[readable-cpp](references/cpp/readable-cpp.md) 只在自有目录显式启用。等级由 `detect_profile.py` 建议并人工确认；Linux 用户态不套 MCU 运行时/链接裁剪。内核不用 C++；Zephyr 仅应用层、ESP-IDF 沿用平台配置。测试按 profile/语言选择，见上表与 [profiles.md](references/profiles.md)。
+
+**默认函数文档**：所有新增自有 C/C++ 函数与方法（含私有、构造、析构、模板、重载）必须有 Doxygen；声明或定义择一，不重复；类级注释不替代。默认英文，项目在 `AGENTS.md` 指定其他语言时按项目，上游贡献按上游规则。`style_gate.py` 的 `doxygen` 默认 `true`，只证明关联块存在，语义与英文质量由评审确认（`DOC-001`）。
 
 **平台问答也按规则回答**：题目中的平台决定该问题的 profile，不以沙箱示例工程覆盖它。Zephyr 驱动缓冲区按 `ZEP-007` 不用 malloc/通用堆；先说明约束，再给每实例静态缓冲区或固定块池方案，不能用“可以，但不推荐”替代强制规则（见 [Zephyr](references/platforms/zephyr.md) §3）。
 
@@ -89,8 +93,10 @@ description: >-
 | HardFault/trap 分析、调试器、RTT/SWO、map 与栈分析 | [verification/debugging.md](references/verification/debugging.md) |
 | 写/审 C 代码（MCU 与 userspace） | [c/barr-c.md](references/c/barr-c.md) |
 | 写/审 C++ 代码：语言标准、命名、类设计、错误处理、生命周期、并发、C SDK 边界 | [cpp/coding.md](references/cpp/coding.md) |
-| 某个 C++ 特性能不能用、资源等级、实测开销 | [cpp/features.md](references/cpp/features.md) |
+| 某个 C++ 特性能不能用、资源等级、实测开销；T1 全局分配护栏的覆盖边界 | [cpp/features.md](references/cpp/features.md)、[cpp/heap-guard.md](references/cpp/heap-guard.md) |
 | C++ 驱动/业务架构、RAII、ISR→任务、DMA、组合根示例 | [cpp/patterns.md](references/cpp/patterns.md) |
+| 默认逐函数 Doxygen、可选 readable-cpp、显式范围/真实数据库门禁、团队注释规则 | [cpp/readable-cpp.md](references/cpp/readable-cpp.md) |
+| 可选 UI 页面/业务服务/硬件适配（原创背光例） | [architecture/ui-application.md](references/architecture/ui-application.md) |
 | C++ 单元测试（CppUTest）、Mock 接缝、开销评估、HIL | [verification/cpp-testing.md](references/verification/cpp-testing.md) |
 | MCU host 单元测试、mock、覆盖率 | [verification/ceedling.md](references/verification/ceedling.md) |
 | Zephyr 应用/驱动/模块 | [platforms/zephyr.md](references/platforms/zephyr.md) |
@@ -107,7 +113,8 @@ description: >-
 - `scripts/detect_profile.py <repo>`：profile 识别。
 - `scripts/arch_lint.py <repo> [--config layers.json]`：MCU 分层依赖检查（`#include` 方向、app/module 中的 HAL 调用与寄存器访问）。默认层映射见 `assets/arch_layers.json`。
 - `scripts/barrc/check.sh <files...>`：Barr Group 官方 BARR-C:2018 enforcement kit（clang-format + clang-tidy + 词法门禁）。需要目标仓库根目录有 `assets/barr-c/` 中的 `.clang-format`、`.clang-tidy`；只对 MCU 生产代码中的 `.c/.h` 运行，不对 C++ 文件、`tests/`、`platform/` 厂商代码运行。
-- 编译告警门禁：`assets/barr-c/COMPILER_FLAGS.md`（C）、`assets/cpp/compile_flags.md`（C++，含 `-fno-exceptions -fno-rtti` 与 `linker_discard.ld`）。
+- `scripts/style_gate.py --root <repo> --manifest <style-gate.json>`：按清单显式选择 C/C++ 范围，执行布局、命名与默认 Doxygen 块存在性检查；空范围 `PASS EMPTY`，退出码 `0/1/2/3` 分别表示通过/违规/配置错误/缺工具。C++ 命名使用真实 `compile_commands.json`，`llvm_major` 必须与工具一致；不要用裸 `-- -std=c++17` 代替。
+- 编译告警门禁：`assets/barr-c/COMPILER_FLAGS.md`（C）、`assets/cpp/compile_flags.md`（自有 MCU C++；Linux/平台构建不能照搬运行时与链接裁剪）。
 - C++：`assets/cpp/.clang-format`、`assets/cpp/.clang-tidy`（`platform/` 用 `clang-tidy-platform.yaml`）；模板在 `assets/cpp/templates/`。
 - `scripts/cpp_cost.py check <elf> --tier T0|T1|T2|T3 [--budget budget.json]`：检查链接产物中按等级禁止的运行时（异常、RTTI、堆、atexit、guard、printf、iostream、原子库调用）与段预算；`cpp_cost.py diff <base.elf> <new.elf>`：A/B 尺寸增量。
 - `scripts/bench/run.sh --cpu <cpu> [--etl <etl>/include]`：在项目工具链上复现 C++ 特性开销表。

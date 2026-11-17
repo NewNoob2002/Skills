@@ -1,6 +1,6 @@
 # Modern Embedded C++ 编码规范
 
-适用于 `.cpp/.hpp` 文件（`mcu-*`、`zephyr` 应用层、`linux-userspace`）。C 文件继续适用 [c/barr-c.md](../c/barr-c.md)。等级 T0–T3 与特性取舍见 [cpp/features.md](features.md)。
+平台 profile、资源等级与风格分别选择；`.cpp/.cc/.cxx` 及 C++ 专用头适用本文，C API 按对应平台 C 规则。`.h` 按契约分类，不能一律当 C。既有项目配置与上游贡献规范优先；`readable-cpp` 仅显式启用，见 [readable-cpp.md](readable-cpp.md)。等级 T0–T3 与特性取舍见 [cpp/features.md](features.md)。
 
 规则来源：
 
@@ -22,7 +22,7 @@
 
 ## 2. 编译与链接
 
-按 `assets/cpp/compile_flags.md` 配置，要点：
+以下为自有 MCU T0–T2 默认值，按 `assets/cpp/compile_flags.md` 配置。Zephyr/ESP-IDF 用其构建系统与 Kconfig/组件配置，Linux 用户态 T3 用项目选项；不继承此处禁用运行时、链接裁剪、LTO 或资源检查要求。要点：
 
 - MCU 一律 `-fno-exceptions -fno-rtti -fno-use-cxa-atexit`，并把 `assets/cpp/linker_discard.ld` 并入链接脚本。
 - `-fno-threadsafe-statics` 只在满足 §6 前提时使用。
@@ -31,7 +31,9 @@
 - LTO 默认关闭。
 - 每次构建后运行 `scripts/cpp_cost.py check <elf> --tier <Tn>`。
 
-## 3. 命名与格式（方案 A）
+## 3. 命名与格式（默认方案 A）
+
+无项目/平台风格时保留以下默认值。可显式改选 [readable-cpp v1](readable-cpp.md)，不改变 profile 或资源等级。
 
 - **布局**：沿用 BARR-C 布局（Allman、4 空格、函数名与括号间空格）。C++ 列宽 100，使用 `assets/cpp/.clang-format`；C 文件继续用 `assets/barr-c/.clang-format`（80 列）。C 与 C++ 同目录时，按文件类型分开调用 clang-format。
 - **命名**：
@@ -49,7 +51,15 @@
 - 不用 BARR-C 的类型编码前缀 `p_`、`b_`、`h_`（NL.5）。C 文件仍按 BARR-C。
 - 机械检查用 `assets/cpp/.clang-tidy`（`readability-identifier-naming`）。向量表固定名（`USART1_IRQHandler`）用 `NOLINTBEGIN/END(readability-identifier-naming)` 并写明理由。
 - 文件：`.cpp`/`.hpp` 为 C++；能被 C 包含的头用 `.h`，且只含 C 构造。头文件用 `#ifndef` guard（与 C 侧一致）。
-- Zephyr 应用中的 C++ 跟随 Zephyr 代码风格；Linux 用户态跟随项目风格。
+- Zephyr 应用、ESP-IDF C++ 和 Linux 用户态均跟随项目及平台风格，不自动套用方案 A。
+
+### 函数文档（默认强制）
+
+- 所有新增自有函数、方法与成员函数（含私有方法、构造、析构、模板和重载）必须有 Doxygen；声明或定义择一，不重复。
+- **类级注释不能替代逐函数说明**；普通 `//`、文件级注释也不算。
+- 默认英文；项目在 `AGENTS.md` 指定其他注释语言时按项目，上游贡献按上游规则。
+- 按接口需要写明参数、返回值、错误语义、ISR/线程上下文和所有权；`void` 函数不虚构返回值。
+- `style_gate.py` 默认检查块是否存在；英文质量、标签完整性和语义仍由评审确认。宏生成、未编译分支和未被 TU 触达的头需人工核对。
 
 ## 4. 类设计
 
@@ -83,7 +93,7 @@
 - **全局对象**：
   - 尽量 `constinit`（C++20）或 `constexpr` 构造（C++17），使其进入 `.data/.bss`，消除跨编译单元的初始化顺序问题（I.22）。
   - 非平凡的动态初始化在 `main()` 之前执行（`__libc_init_array`）：不得访问硬件、RTOS 或日志。
-  - 析构永不执行：用 `-fno-use-cxa-atexit` + `linker_discard.ld` 去掉注册代码。Zephyr 不支持静态析构。
+  - 自有 MCU T0–T2 的静态析构永不执行：用 `-fno-use-cxa-atexit` + `linker_discard.ld` 去掉注册代码。Zephyr 不支持静态析构；Linux T3 保留正常 C++ 生命周期。
 - **启动代码**：确认调用了 `__libc_init_array`（CubeMX 启动文件会调用）。自写启动文件若遗漏，非 `constinit` 的全局对象都不会被构造。
 - **函数局部静态**（Meyers 单例）：
   - 动态初始化会链接 `__cxa_guard_acquire`；arm-none-eabi 的 libstdc++ 不与你的 RTOS 集成。
@@ -91,7 +101,7 @@
   - 绝不在 ISR 中首次触达（CP.110 同理）。
 - **堆**：
   - T0 禁止：`cpp_cost.py --tier T0` 检出 `heap` 类即失败。
-  - T1 只在初始化期分配，之后锁定（`assets/cpp/templates/bsp/heap_guard.cpp`）。
+  - T1 只在初始化期分配，之后锁定（`assets/cpp/templates/bsp/heap_guard.cpp`）；入口、对齐容量与 C 分配边界见 [heap-guard.md](heap-guard.md)。
   - T2 把分配器作为参数注入（Pigweed 做法）或使用固定池；库内部不直接 `new`；ISR 与 RT 路径禁止。
   - 池/分配器的存储必须来自静态区或调用方；`allocate()` 内不得回调 `malloc/new`，否则仍按通用堆处理。
   - FreeRTOS 项目若需要堆，`operator new` 映射到 `pvPortMalloc` 并沿用同样的锁定规则。
@@ -106,7 +116,7 @@
 
 ## 7. ISR、DMA、RTOS 与并发
 
-- **上下文标注**（Pigweed）：每个公共函数在文档注释中写明 `ISR-safe`、`thread-safe` 或两者都不是。未标注的视为都不安全。ISR 专用方法以 `_from_isr` 结尾。
+- **上下文标注**（Pigweed）：每个公共函数在文档注释中写明 `ISR-safe`、`thread-safe` 或两者都不是。未标注的视为都不安全。ISR 专用方法默认以 `_from_isr` 结尾；`readable-cpp` 使用 `FromIsr` 后缀，C API 仍保持平台名称。
 - **ISR 内禁止**：分配、阻塞、获取非 ISR 安全的锁、异常、`std::function`、非 ISR 安全的日志。虚调用允许，代价约等于 C 函数指针，但要计入时序预算。
 - **共享数据**：
   - 不用 `volatile` 同步（CP.8），`volatile` 只用于 MMIO 与 DMA 描述符（CP.200）。
@@ -139,7 +149,7 @@
 3. **回调**：SDK 的“函数指针 + `void*` 上下文”回调，用 `noexcept` 静态成员蹦床转回对象；异常不得穿越 C 边界。
 4. **跨边界数据**：`static_assert(std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>)`，必要时再用 `sizeof`/`offsetof` 锁定布局。不传引用、模板、`enum class` 或 `std::` 类型。
 5. **把 C++ 对象暴露给 C**：用不透明句柄（`struct proj_console;` + `extern "C"` 访问函数）。
-6. **生成的 `main.c`**（CubeMX 等）保持为 C，在 `USER CODE` 区调用 `extern "C" void app_main(void)`，由 C++ 实现组合根（`app_main.cpp`）。
+6. **生成的 `main.c`**（CubeMX 等）保持为 C，在 `USER CODE` 区包含共享 ABI 头并调用 `app_main()`；`extern "C"` 只能出现在头的 `#ifdef __cplusplus` 分支或 `.cpp` 中。C 调用、C++ 实现的最小可运行样例见 `assets/cpp/abi/`，同一个 `backlight.h` 由两种语言包含。
 7. **寄存器访问**：保留 CMSIS 结构体，或用类型安全寄存器包装（modm `Register/Flags` 思路）。`reinterpret_cast` 只出现在 platform 层的单一访问点（`clang-tidy-platform.yaml` 豁免），且不能用于 `constexpr`。不用位域映射寄存器。
 8. **配置值校验**：能在编译期算出的硬件配置（分频、波特率误差、缓冲区对齐）用 `static_assert` 校验（`uart_divider.hpp`，modm 思路）。
 
@@ -166,6 +176,6 @@
 ## 11. 静态分析
 
 - 编译告警：见 §2。
-- clang-tidy：C++ 目录放 `assets/cpp/.clang-tidy`，`platform/` 放 `assets/cpp/clang-tidy-platform.yaml`（重命名为 `.clang-tidy`）。关闭项及原因写在配置注释中。
+- clang-tidy：按项目/平台选配置；无既有配置的 MCU C++ 可放默认 `assets/cpp/.clang-tidy`，显式 readable-cpp 用其独立配置。原默认 `platform/` 豁免仍见 `assets/cpp/clang-tidy-platform.yaml`，不得把 SDK 纳入新风格。工具版本与真实数据库要求见 [readable-cpp.md §2](readable-cpp.md#2-选择与安装)。
 - 可选：Clang `-Wthread-safety` + 锁注解（Pigweed `pw_sync/lock_annotations.h`）。
 - cppcheck 作补充；功能安全项目使用支持 MISRA C++:2023 的商业工具。

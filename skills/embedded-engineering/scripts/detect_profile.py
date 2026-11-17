@@ -18,6 +18,13 @@ SKIP_DIRS = {".git", "build", "out", "node_modules", ".venv", "venv", "__pycache
 MAX_FILES = 20000
 MAX_READ = 64 * 1024
 
+C_SOURCE_SUFFIXES = {".c"}
+CPP_SOURCE_SUFFIXES = {".cpp", ".cc", ".cxx"}
+C_SUFFIXES = C_SOURCE_SUFFIXES
+CPP_SUFFIXES = CPP_SOURCE_SUFFIXES | {".hpp", ".hh", ".hxx", ".ipp"}
+HEADER_SUFFIXES = {".h"}  # 共享 ABI 或 C++ 头，不能仅按扩展名当 C
+SOURCE_SUFFIXES = C_SOURCE_SUFFIXES | CPP_SOURCE_SUFFIXES
+
 # (profile, 权重, 说明, 判定函数(rel_path, name) -> bool, 可选内容正则)
 NAME_RULES = [
     ("zephyr", 5, "west manifest", lambda r, n: n == "west.yml", None),
@@ -56,8 +63,8 @@ NAME_RULES = [
     ("linux-userspace", 3, "Yocto recipe", lambda r, n: n.endswith((".bb", ".bbappend")), None),
     ("linux-userspace", 3, "systemd unit", lambda r, n: n.endswith((".service", ".socket")), None),
     ("linux-userspace", 2, "Meson project", lambda r, n: n == "meson.build", None),
-    ("linux-userspace", 2, "Linux userspace API", lambda r, n: n.endswith(".c"),
-     re.compile(r"#\s*include\s*<(?:gpiod\.h|linux/spi/spidev\.h|linux/i2c-dev\.h|sys/epoll\.h|systemd/sd-daemon\.h)>")),
+    ("linux-userspace", 2, "Linux userspace API", lambda r, n: Path(n).suffix in SOURCE_SUFFIXES,
+     re.compile(r'#\s*include\s*[<"](?:gpiod\.h|linux/spi/spidev\.h|linux/i2c-dev\.h|linux/can(?:/raw)?\.h|sys/epoll\.h|systemd/sd-daemon\.h)[>"]')),
 ]
 
 TOOLING = {
@@ -69,10 +76,6 @@ TOOLING = {
 }
 
 CONTENT_RULE_LIMIT = 300  # 每个内容规则最多读取的文件数，控制大仓库耗时
-
-C_SUFFIXES = {".c"}
-CPP_SUFFIXES = {".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".ipp"}
-HEADER_SUFFIXES = {".h"}  # C 与 C++ 共用，单独计数
 
 CXX_STD_RES = [
     re.compile(r"CMAKE_CXX_STANDARD\s+(\d+)"),
@@ -264,7 +267,7 @@ def scan(root):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     parser.add_argument("root", nargs="?", default=".", help="仓库或子目录")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()

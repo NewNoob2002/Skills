@@ -100,7 +100,12 @@ echo "== clang-tidy check (BARR-C:2018) =="
 # Works without a compilation database (compile flags after --). For real
 # projects generate compile_commands.json (CMake: -DCMAKE_EXPORT_COMPILE_COMMANDS=ON).
 # -x c forces C parsing for .h files, which clang-tidy otherwise treats as C++.
-if [ -f compile_commands.json ]; then
+if [ -n "${BARRC_COMPILE_DB:-}" ]; then
+    # 使用调用方已校验的真实数据库；共享头经包含它的 C TU 做语义检查。
+    for f in $FILES; do
+        case "$f" in *.c) clang-tidy -p "$BARRC_COMPILE_DB" "$f" ;; esac
+    done
+elif [ -f compile_commands.json ]; then
     clang-tidy $FILES
 else
     clang-tidy $FILES -- -x c -std=c99 -Wall

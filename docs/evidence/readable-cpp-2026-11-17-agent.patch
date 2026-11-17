@@ -1,0 +1,90 @@
+diff --git a/c/backlight.h b/c/backlight.h
+index 58496f4..2cc0b95 100644
+--- a/c/backlight.h
++++ b/c/backlight.h
+@@ -19,6 +19,19 @@ extern "C"
+     // NOLINTNEXTLINE(readability-identifier-naming)
+     uint32_t backlight_clamp (uint32_t requested_percent);
+ 
++    /**
++     * @brief Move brightness toward the request by at most five percentage
++     * points after clamping both inputs to 100. Pure function, ISR-safe.
++     * @param current_percent Current percentage; values above 100 are clamped.
++     * @param requested_percent Target percentage; values above 100 are clamped.
++     * @return A percentage in [0, 100], without overshooting the clamped
++     * target. Cannot fail. No ownership is transferred.
++     */
++    // C ABI spelling follows the platform C rules.
++    // NOLINTNEXTLINE(readability-identifier-naming)
++    uint32_t backlight_step (uint32_t current_percent,
++                             uint32_t requested_percent);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/c/main.c b/c/main.c
+index 788ab9c..08b5a08 100644
+--- a/c/main.c
++++ b/c/main.c
+@@ -1,8 +1,33 @@
+ #include "backlight.h"
+ 
+-/** @brief Verify the C-to-C++ call on the host. Owns no resources. */
++#include <stddef.h>
++
++/** @brief Verify the C-to-C++ calls on the host. Owns no resources. */
+ int
+ main (void)
+ {
+-    return (backlight_clamp(0U) == 0U) ? 0 : 1;
++    const struct
++    {
++        uint32_t current_percent;
++        uint32_t requested_percent;
++        uint32_t expected_percent;
++    } test_cases[] = {
++        {0U, 100U, 5U}, {40U, 10U, 35U}, {98U, 120U, 100U},
++        {5U, 0U, 0U},   {25U, 25U, 25U}, {UINT32_MAX, 0U, 95U},
++    };
++    int failed_cases = (0U == backlight_clamp(0U)) ? 0 : 1;
++
++    for (size_t case_index = 0U;
++         case_index < (sizeof(test_cases) / sizeof(test_cases[0]));
++         ++case_index)
++    {
++        if (test_cases[case_index].expected_percent !=
++            backlight_step(test_cases[case_index].current_percent,
++                           test_cases[case_index].requested_percent))
++        {
++            ++failed_cases;
++        }
++    }
++
++    return (0 == failed_cases) ? 0 : 1;
+ }
+diff --git a/cpp/backlight.cpp b/cpp/backlight.cpp
+index b728a58..218a177 100644
+--- a/cpp/backlight.cpp
++++ b/cpp/backlight.cpp
+@@ -10,3 +10,21 @@ extern "C" std::uint32_t backlight_clamp(std::uint32_t requestedPercent)
+     }
+     return requestedPercent;
+ }
++
++extern "C" std::uint32_t backlight_step(std::uint32_t currentPercent,
++                                        std::uint32_t requestedPercent)
++{
++    constexpr std::uint32_t kMaxStep = 5;
++    currentPercent = backlight_clamp(currentPercent);
++    requestedPercent = backlight_clamp(requestedPercent);
++
++    if (currentPercent < requestedPercent) {
++        return ((requestedPercent - currentPercent) > kMaxStep) ? currentPercent + kMaxStep
++                                                                : requestedPercent;
++    }
++    if (currentPercent > requestedPercent) {
++        return ((currentPercent - requestedPercent) > kMaxStep) ? currentPercent - kMaxStep
++                                                                : requestedPercent;
++    }
++    return currentPercent;
++}

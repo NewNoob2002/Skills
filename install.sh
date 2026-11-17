@@ -7,6 +7,7 @@
 # 选项：
 #   --with-agents-md   项目中没有 AGENTS.md 时复制模板（只在 --scope project 时有效）
 #   --with-barrc       项目根没有 .clang-format/.clang-tidy/.editorconfig 时复制 BARR-C 配置
+#   --cpp-style NAME --cpp-dir DIR  显式复制 default-cpp/readable-cpp 配置到自有 C++ 目录
 #   --overwrite        已安装同名技能时替换（默认拒绝）
 #   --dry-run          只打印将要执行的操作
 set -eu
@@ -20,6 +21,8 @@ project_dir=$(pwd)
 dest=""
 with_agents_md=0
 with_barrc=0
+cpp_style=""
+cpp_dir=""
 overwrite=0
 dry_run=0
 
@@ -36,6 +39,8 @@ while [ "$#" -gt 0 ]; do
         --dest) dest=${2:?}; shift 2 ;;
         --with-agents-md) with_agents_md=1; shift ;;
         --with-barrc) with_barrc=1; shift ;;
+        --cpp-style) cpp_style=${2:?}; shift 2 ;;
+        --cpp-dir) cpp_dir=${2:?}; shift 2 ;;
         --overwrite) overwrite=1; shift ;;
         --dry-run) dry_run=1; shift ;;
         -h|--help) usage 0 ;;
@@ -65,6 +70,33 @@ if [ -z "$dest" ]; then
             dest=$(CDPATH= cd -- "$project_dir" && pwd)/$sub ;;
         user) dest=$HOME/$sub ;;
         *) echo "error: --scope must be project or user" >&2; exit 2 ;;
+    esac
+fi
+
+if [ -n "$cpp_style$cpp_dir" ]; then
+    [ "$scope" = project ] && [ -n "$agent" ] && [ -n "$cpp_style" ] && [ -n "$cpp_dir" ] || {
+        echo "error: C++ config needs --scope project --agent --cpp-style --cpp-dir" >&2; exit 2;
+    }
+    case "$cpp_style" in
+        default-cpp) cpp_config=$SRC_DIR/assets/cpp ;;
+        readable-cpp) cpp_config=$SRC_DIR/assets/cpp/readable-cpp ;;
+        *) echo "error: unknown C++ style: $cpp_style" >&2; exit 2 ;;
+    esac
+    case "/$cpp_dir/" in
+        *'/'../*|*'/'third_party/*|*'/'vendor/*|*'/'generated/*|*'/'sdk/*|*'/'platform/*|*'/'middleware/*)
+            echo "error: --cpp-dir must select an owned relative directory" >&2; exit 2 ;;
+    esac
+    case "$cpp_dir" in
+        /*) echo "error: --cpp-dir must select an owned relative directory" >&2; exit 2 ;;
+    esac
+    [ -d "$project_dir/$cpp_dir" ] || { echo "error: --cpp-dir must exist" >&2; exit 2; }
+    cpp_target=$(CDPATH= cd -- "$project_dir/$cpp_dir" && pwd -P)
+    proj_root=$(CDPATH= cd -- "$project_dir" && pwd -P)
+    case "$cpp_target/" in "$proj_root/"*) : ;; *) echo "error: C++ directory escapes project" >&2; exit 2 ;; esac
+    cpp_relative=${cpp_target#"$proj_root"}
+    case "$cpp_relative/" in
+        *'/'third_party/*|*'/'vendor/*|*'/'generated/*|*'/'sdk/*|*'/'platform/*|*'/'middleware/*)
+            echo "error: --cpp-dir must select an owned relative directory (resolved path)" >&2; exit 2 ;;
     esac
 fi
 
@@ -109,6 +141,23 @@ if [ "$scope" = project ] && [ -n "$agent" ]; then
             run cp "$SRC_DIR/assets/AGENTS.md.template" "$proj/AGENTS.md"
             echo "next: fill the placeholders in $proj/AGENTS.md (choose one of six profiles; list by directory if multiple)"
         fi
+    fi
+    if [ -n "$cpp_style" ]; then
+        for f in .clang-format .clang-tidy; do
+            # 任一祖先已有项目配置时不安装会遮蔽它的配置。
+            ancestor=$cpp_target
+            existing=""
+            while :; do
+                if [ -e "$ancestor/$f" ]; then existing=$ancestor/$f; break; fi
+                [ "$ancestor" != "$proj_root" ] || break
+                ancestor=$(dirname "$ancestor")
+            done
+            if [ -n "$existing" ]; then
+                echo "skip: $existing exists (merge $cpp_config/$f manually)"
+            else
+                run cp "$cpp_config/$f" "$cpp_target/$f"
+            fi
+        done
     fi
     if [ "$with_barrc" -eq 1 ]; then
         for f in .clang-format .clang-tidy .editorconfig; do

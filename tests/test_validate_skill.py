@@ -198,8 +198,12 @@ class MutationTest(unittest.TestCase):
         self.assertTrue(any("1024" in m for m in self.messages("frontmatter")))
 
     def test_unknown_field_and_numeric_metadata(self):
-        replace(self.skill / "SKILL.md", "name: embedded-engineering\n",
-                "name: embedded-engineering\nversion: 2\nmetadata:\n  version: 1.0\n")
+        path = self.skill / "SKILL.md"
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("name: embedded-engineering\n",
+                            "name: embedded-engineering\nversion: 2\n", 1)
+        text = re.sub(r"(?m)^  version: .*$", "  version: 1.0", text, count=1)
+        path.write_text(text, encoding="utf-8")
         self.assert_only_fails("frontmatter")
         msgs = " ".join(self.messages("frontmatter"))
         self.assertIn("unknown frontmatter field: version", msgs)

@@ -22,3 +22,5 @@ gates:
     run: "./scripts/ci/check_compliance.py -c origin/main..HEAD（Zephyr 树内）"
   - tool: twister
     run: "west twister -T <tests/dir>"
+  - tool: style_gate
+    run: "python3 <skill>/scripts/style_gate.py --root <repo> --manifest <style-gate.json>（仅自有 C++ 应用目录；项目/Zephyr 配置优先，未启用时 NOT_RUN）"

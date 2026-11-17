@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "llvm_major": 23,
+  "style": "project",
+  "compile_commands": "build/compile_commands.json",
+  "cpp": ["cpp/**/*.cpp"],
+  "cpp_headers": ["cpp/**/*.hpp"],
+  "c": ["c/*.c", "c/*.h"],
+  "doxygen": true
+}

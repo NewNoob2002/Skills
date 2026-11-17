@@ -1,0 +1,23 @@
+# Optional readable-cpp v1; own C++ directories only. Verify with LLVM 23.
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+  AfterClass: true
+  AfterStruct: true
+  AfterNamespace: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+InsertBraces: true
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+IncludeIsMainRegex: '(_test)?$'
+PointerAlignment: Left
+InsertNewlineAtEOF: true
+LineEnding: LF

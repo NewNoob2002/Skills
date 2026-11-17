@@ -27,3 +27,5 @@ gates:
     run: "pre-commit run astyle_py --files <files>（项目已配置时）"
   - tool: idf_pytest
     run: "pytest --target <target> <test_apps>（pytest-embedded，需开发板）"
+  - tool: style_gate
+    run: "python3 <skill>/scripts/style_gate.py --root <repo> --manifest <style-gate.json>（仅自有 C++ 组件；项目/IDF 配置优先，未启用时 NOT_RUN）"

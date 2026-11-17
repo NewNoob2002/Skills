@@ -18,18 +18,22 @@ env:
 jobs:
   static:
     runs-on: ubuntu-24.04
+    # 固定 digest 的项目镜像含 LLVM 23；门禁同时校验 llvm_major。
+    container: <registry>/firmware-tools@sha256:<digest>
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y clang-format clang-tidy
+      - name: Configure real compilation database
+        run: cmake --preset <analysis-preset> -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
       - name: Layering (ARCH-001..006)
         run: python3 "$SKILL_DIR/scripts/arch_lint.py" .
-      - name: BARR-C gate on C production code (C-*, CFMT-*)
-        run: sh "$SKILL_DIR/scripts/barrc/check.sh" $(git ls-files 'app/*.[ch]' 'module/*.[ch]' 'interface/*.[ch]' 'driver/*.[ch]' 'bsp/*.[ch]')
-      - name: clang-format for C++ (assets/cpp/.clang-format)
-        run: git ls-files '*.cpp' '*.hpp' | xargs --no-run-if-empty clang-format --style=file:"$SKILL_DIR/assets/cpp/.clang-format" --dry-run --Werror
+      # style-gate.json: 显式 c/cpp/cpp_headers 范围，空集不回退全仓。
+      # C 调 BARR-C；C++ 布局/命名由所选配置与真实数据库检查（CPPF-001/002）。
+      - name: Selected C and C++ gates (optional DOC-001)
+        run: >-
+          python3 "$SKILL_DIR/scripts/style_gate.py"
+          --root . --manifest style-gate.json
 
   host-tests:
     runs-on: ubuntu-24.04
@@ -42,6 +46,7 @@ jobs:
       - name: C++ unit tests (CppUTest via CMake)
         run: cmake -S <tests/cpp> -B build-host && cmake --build build-host && ctest --test-dir build-host --output-on-failure
 
+  # 仅 MCU 固件选择此 job；Linux 用户态沿用自身构建，不套 T1/链接裁剪门禁。
   target-build:
     runs-on: ubuntu-24.04
     steps:

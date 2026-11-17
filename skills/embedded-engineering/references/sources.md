@@ -29,6 +29,19 @@
 
 **核实状态**：上表最后两行在 2026-11-05 对照原文核实。Cortex-M 一行中的 CFSR/HFSR/MMFAR/BFAR 地址、CFSR 各位位号、HFSR `FORCED`/`VECTTBL`、ACTLR `DISDEFWBUF` 于 2026-11-05 与 ARM CMSIS 头文件 `core_cm4.h`（CMSIS 4）和 `core_cm33.h`（CMSIS 5）逐项核对一致；异常栈帧与 EXC_RETURN 位语义未核对。RISC-V、ThreadX、MCUboot 三行依据上述文档编写，但没有在本次会话中逐条对照原文；寄存器地址、位号、异常码、API 名称在用于具体芯片之前，必须对照该芯片的参考手册和所用版本的文档（`GEN-002`）。
 
+## 本轮风格参考与可追溯依据
+
+核对日期：2026-11-17。网页抓取受代理地址限制，GitHub API 速率限制；实际读取的是下列上游 Git 提交的临时稀疏克隆源码。版本与路径是读取证据，不表示已对上游整体审计。
+
+| 来源/实际版本 | 实际阅读路径 | 类别与采用理由 |
+| --- | --- | --- |
+| [X-TRACK dev_lvgl_v9](https://github.com/FASTSHIFT/X-TRACK/tree/28b0e90898eb6fcb474c7a354459242c781d780a)，`28b0e90898eb6fcb474c7a354459242c781d780a` | `Firmware/X-TRACK/App/App.cpp`；`App/UI/Dashboard/{Dashboard,DashboardModel,DashboardView}.{cpp,h}`；`App/Service/DataProc/DP_Backlight.cpp`（后两项同属 `Firmware/X-TRACK/`） | 样例观察：组合根、页面呈现/数据分工、背光服务。用于提出可选职责参考，不作为正式标准，不复制实现。 |
+| 同提交 | `Firmware/X-TRACK/Frameworks/PageManager/{PageBase.h,PageManager.h,PageManager.cpp,PageManagerRouter.cpp,PageManagerState.cpp}` | 样例观察：显式加载/出现/消失/卸载生命周期；可供页面清理职责参考。未阅读的目录文件不算覆盖。 |
+| [InfiniTime main](https://github.com/InfiniTimeOrg/InfiniTime/blob/9ad16304f5fd526b781a760cf1313813d232645e/doc/coding-convention.md)，`9ad16304f5fd526b781a760cf1313813d232645e` | `doc/coding-convention.md` | 上游明文：2 空格、同行花括号、类型/命名空间 PascalCase、变量 camelCase、成员不加前后缀。采用重视可读性与明确风格的理由，未照搬这些具体取值。 |
+| [Pigweed Style Guide](https://pigweed.dev/style_guide.html) 的 Git 源码，`c9174437f47c28f60d4b1a14ad9835049b5782dc` | `docs/sphinx/style_guide.rst`；`docs/sphinx/style/cpp.rst` | 上游明文：Google 风格及其覆盖、自动格式化、控制体花括号、C 兼容头/void 参数/受保护 extern C、所有权与线程上下文文档。采用边界与文档要求的依据，不把其所有资源策略施加给 Linux。 |
+
+本仓库新定：readable-cpp 的 4 空格、100 列目标、函数花括号换行/控制体同行、lowerCamelCase 方法、私有成员 `_` 与 `kPascalCase` 的组合，是本仓库的可选风格，不声称 X-TRACK/InfiniTime/Pigweed 正式标准如此规定。X-TRACK 的 raw new/delete 所有权、无类型事件包不采用；原创 UI 示例使用借用引用和有类型返回状态。逐函数 Doxygen（默认英文，项目可指定语言）是本仓库新定的默认规则，不是上述上游标准原文；工具仅证明关联块存在。
+
 ## 已知需要随上游复核的点
 
 - Zephyr 的 `Assisted-by:` 格式与 coding guidelines 规则表（随版本变化）。

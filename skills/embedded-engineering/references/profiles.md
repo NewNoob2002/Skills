@@ -53,11 +53,12 @@
 
 ## 5. C/C++ 混合工程
 
-- 规则按文件类型划分：`.c` 与只含 C 构造的 `.h` 适用 C 规范（MCU 为 BARR-C）；`.cpp/.hpp/.cc/.hh` 适用 [cpp/coding.md](cpp/coding.md)。C 头被 C++ 包含时，仍按 C 规范编写，并加 `extern "C"` 保护。
+- 规则按语言契约划分：`.c` 适用对应平台 C 规范（自有 MCU 默认 BARR-C）；`.cpp/.cc/.cxx` 与 C++ 专用头适用 [cpp/coding.md](cpp/coding.md)。`.h` 不自动归 C；共享 ABI 头只含 C 构造，用 `#ifdef __cplusplus` 保护 `extern "C"`，并由 C/C++ 各自编译测试。
+- 所有新增自有 C/C++ 函数与方法默认必须有 Doxygen（含私有、构造、析构、模板、重载；声明或定义择一，不重复；类级注释不替代）。默认英文，项目可指定语言；`style_gate.py` 的 `doxygen` 默认 `true`，只检查块存在，语义由评审确认。第三方、生成代码和遗留基线不选入门禁。
 - C++ 适用性：`mcu-*` 可用；`zephyr` 只在应用层用（内核、驱动、`SYS_INIT` 保持 C）；`linux-kernel` 不用；`linux-userspace` 按 T3。
 - 资源等级 T0–T3 决定 C++ 特性取舍（[cpp/features.md](cpp/features.md)）。`detect_profile.py` 的 `resource_tier` 从链接脚本推算，属建议值。
-- 格式：C++ 沿用 BARR-C 布局，列宽 100（`assets/cpp/.clang-format`）；C 用 `assets/barr-c/.clang-format`。同目录混放时按文件类型分别调用 clang-format。
-- 命名：C++ 不用 BARR-C 的 `p_`/`b_`/`h_` 类型前缀，用命名空间代替模块前缀；可变全局变量保留 `g_` 作用域前缀。
+- 平台、资源等级、风格独立选择。自有 MCU 无既有风格时保留方案 A（Allman/100 列）；显式选用的 `readable-cpp` 见 [cpp/readable-cpp.md](cpp/readable-cpp.md)。C API 保持平台 C 命名；同目录混编用显式范围分流，不能按所有 `.h` 或空集合回退全仓。
+- Zephyr 应用 C++ 默认 Zephyr 风格与 ztest/Twister；ESP-IDF C++ 用项目/IDF 风格与 IDF 构建、测试；Linux 用户态 C++ 用项目风格、真实编译数据库和项目测试，资源为 T3，不继承 MCU 禁运行时/链接裁剪。只有显式选择的自有目录用 readable-cpp，上游贡献仍按上游规则。
 - 测试：C 用 Ceedling，C++ 用 CppUTest；Zephyr 以 ztest + Twister 为准，只有不依赖 Zephyr API 的纯逻辑库可额外做 Ceedling/CppUTest host 测试。
 
 | 主题 | C（BARR-C） | C++（cpp/coding.md） |

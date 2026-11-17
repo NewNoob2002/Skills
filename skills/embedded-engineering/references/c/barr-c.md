@@ -3,6 +3,7 @@
 - 标准原文（免费 PDF/在线版）：<https://barrgroup.com/embedded-c-coding-standard>。下文规则是**意译摘要**，有疑问以原文为准。
 - 官方 enforcement kit（MIT，Barr Group）：<https://github.com/netrinomike/barr-c>，本技能在 `assets/barr-c/` 与 `scripts/barrc/check.sh` 中附带其 2018 版副本。
 - **只适用于 C 文件**（`.c` 与只含 C 构造的 `.h`）。C++ 文件见 [cpp/coding.md](../cpp/coding.md)，二者的对照见 [profiles.md](../profiles.md) §5。
+- **技能默认补充规则（`DOC-001`，不是 BARR-C 原文）**：所有新增自有 C 函数与 C 头中的函数声明必须有 Doxygen，声明或定义择一，不重复；类级/文件级注释不替代。默认英文，项目可在 `AGENTS.md` 指定其他语言；按接口需要说明参数、返回值、错误语义、ISR/线程上下文和所有权。BARR-C 的注释规则（§2）仍然同时适用。
 - 2018 版共 167 条，其中 45 条标为 **bug-killing**（下表标 ★）。kit 机械门禁覆盖 61 条，其余约 100 条需要代码审查。
 
 ## 1. 适用方式

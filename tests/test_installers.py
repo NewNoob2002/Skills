@@ -61,6 +61,43 @@ class InstallerTest(unittest.TestCase):
             self.assertEqual(marker.read_text(), "old")
             self.assertEqual(list(Path(tmp).iterdir()), [target])
 
+    def test_cpp_config_is_explicit_and_preserves_project_config(self):
+        for existing in (False, True):
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "owned").mkdir()
+                if existing:
+                    for name in (".clang-format", ".clang-tidy"):
+                        (root / name).write_text("project config\n")
+                proc = subprocess.run(["sh", str(ROOT / "install.sh"), "--agent", "codex",
+                                       "--scope", "project", "--project-dir", tmp,
+                                       "--cpp-style", "readable-cpp", "--cpp-dir", "owned"],
+                                      capture_output=True, text=True, check=False)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                for name in (".clang-format", ".clang-tidy"):
+                    if existing:
+                        self.assertEqual((root / name).read_text(), "project config\n")
+                        self.assertFalse((root / "owned" / name).exists())
+                    else:
+                        self.assertEqual((root / "owned" / name).read_bytes(),
+                                         (ROOT / "skills/embedded-engineering/assets/cpp/readable-cpp" / name).read_bytes())
+
+    def test_cpp_config_rejects_vendor_and_escape(self):
+        for directory in ("vendor", "owned/vendor", "../escape", "alias"):
+            with self.subTest(directory=directory), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                if directory == "alias":
+                    (root / "vendor").mkdir()
+                    (root / "alias").symlink_to(root / "vendor", target_is_directory=True)
+                elif directory != "../escape":
+                    (root / directory).mkdir(parents=True)
+                proc = subprocess.run(["sh", str(ROOT / "install.sh"), "--agent", "codex",
+                                       "--scope", "project", "--project-dir", tmp,
+                                       "--cpp-style", "readable-cpp", "--cpp-dir", directory],
+                                      capture_output=True, text=True, check=False)
+                self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                self.assertIn("owned relative directory", proc.stderr)
+
     def test_west_pinned_failure_does_not_install_latest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

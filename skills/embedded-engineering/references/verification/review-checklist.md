@@ -64,7 +64,8 @@
 - [ ] `cpp_cost.py check <elf> --tier <Tn>` 通过；`--allow` 例外有评审理由；如有预算文件，段预算通过
 - [ ] 与基线相比的 `cpp_cost.py diff` 增量已报告
 - [ ] 目标构建使用 `-fno-exceptions -fno-rtti -fno-use-cxa-atexit`（T0–T2），严格告警组 `-Werror`，第三方头 `-isystem`
-- [ ] clang-format（`assets/cpp/.clang-format`）与 clang-tidy（`assets/cpp/.clang-tidy`）无新增发现
+- [ ] 格式/命名使用所选项目与平台配置；readable-cpp 仅显式自有范围启用，真实编译数据库与工具版本已校验；空范围不回退全仓
+- [ ] 所有新增自有 C/C++ 函数/方法（含私有/构造/析构/模板/重载）有 Doxygen，声明或定义择一，默认英文或项目指定语言；类级注释不替代；机械检查仅证明块存在；英文质量、按需参数/返回/错误/ISR线程上下文/所有权、无重复由评审确认
 - [ ] 全局对象 `constinit`/`constexpr` 构造；构造函数不访问硬件；硬件在显式 `init()` 中初始化
 - [ ] 无 ISR 中首次触达的函数局部静态；无动态初始化的 Meyers 单例（T0）
 - [ ] 多态基类为受保护非虚析构 + `final` 实现；`virtual` 只在运行期选择的边界

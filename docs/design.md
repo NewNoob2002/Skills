@@ -13,7 +13,7 @@
 ```text
 skills/embedded-engineering/      唯一的安装单元（install.sh 原样复制）
   SKILL.md                        护栏、profile 判定、工作流路由、reference 路由、机械门禁、输出约定（< 150 行）
-  standards/rules.yaml            132 条带 ID 的规则：profile、等级、验证方法与覆盖范围、出处章节、冲突
+  standards/rules.yaml            135 条带 ID 的规则：profile、等级、验证方法与覆盖范围、出处章节、冲突
   profiles/<id>.yaml              6 个 profile 的规范、测试基线、门禁命令
   references/                     按领域分目录，按需加载（workflows、architecture、c、cpp、rtos、platforms、verification）
   scripts/                        detect_profile、arch_lint、cpp_cost、BARR-C 门禁、开销基准

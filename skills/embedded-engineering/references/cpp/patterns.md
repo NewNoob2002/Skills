@@ -84,10 +84,12 @@ static_assert(proj::UartDivider<80000000U, 115200U>::kDivider == 694U);
 
 ## 7. C SDK 边界
 
+以下片段仅属于 `.cpp`；`main.c` 包含的共享 ABI 头须用 `#ifdef __cplusplus` 保护 linkage，完整双语言编译/链接/运行样例见 `assets/cpp/abi/`。不要把未保护的 `extern "C"` 写进 C 文件。
+
 ```cpp
 extern "C"
 {
-    [[noreturn]] void app_main (void);    // main.c 在 USER CODE 区调用
+    [[noreturn]] void app_main (void);    // main.c 通过共享 ABI 头调用
     // NOLINTBEGIN(readability-identifier-naming)
     void USART1_IRQHandler (void);        // 必须 extern "C"，否则弱默认处理函数生效
     // NOLINTEND(readability-identifier-naming)
