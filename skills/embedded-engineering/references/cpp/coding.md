@@ -78,7 +78,7 @@
 
 ## 6. 内存、栈与对象生命周期
 
-存储期优先级：有界的自动存储 > `constinit` 静态存储 > 固定池（`etl::pool`、ThreadX block pool、`K_MEM_SLAB`）> 仅初始化期的堆 > 通用堆（仅 T3 非 RT）。
+存储期优先级：有界的自动存储 > `constinit` 静态存储 > 固定池（`etl::pool`、ThreadX block pool、`K_MEM_SLAB`；含池分配器的标准容器）> 仅初始化期的堆 > 通用堆（仅 T3 非 RT）。
 
 - **全局对象**：
   - 尽量 `constinit`（C++20）或 `constexpr` 构造（C++17），使其进入 `.data/.bss`，消除跨编译单元的初始化顺序问题（I.22）。
@@ -92,8 +92,14 @@
 - **堆**：
   - T0 禁止：`cpp_cost.py --tier T0` 检出 `heap` 类即失败。
   - T1 只在初始化期分配，之后锁定（`assets/cpp/templates/bsp/heap_guard.cpp`）。
-  - T2 把分配器作为参数注入（Pigweed 做法），库内部不直接 `new`；ISR 与 RT 路径禁止。
+  - T2 把分配器作为参数注入（Pigweed 做法）或使用固定池；库内部不直接 `new`；ISR 与 RT 路径禁止。
+  - 池/分配器的存储必须来自静态区或调用方；`allocate()` 内不得回调 `malloc/new`，否则仍按通用堆处理。
   - FreeRTOS 项目若需要堆，`operator new` 映射到 `pvPortMalloc` 并沿用同样的锁定规则。
+- **标准容器（T1/T2 的有界用法）**：
+  - 允许 `std::vector<T, PoolAllocator>` 这类组合，但必须同时满足：容量编译期固定；存储来自固定池/静态区/调用方；构造或初始化期一次性预留；运行期不调用会扩容的 API；分配失败路径显式且有界；非 ISR/RT。
+  - 默认 `std::allocator` 在 T0–T2 仍禁止；T0 仍禁止所有会分配的标准容器。`#include <vector>` 本身不产生代码，违规点是默认分配器与扩容路径的实例化/调用。
+  - 对 `std::string` 使用固定容量分配器时同样要求上界与不扩容；`std::map`/`unordered_*` 还需逐节点池并禁止 rehash，通常直接用 `etl::flat_map`。
+  - 有界用法的可编译样例见 `evals/projects/freertos-cpp/good/module/filter/fixed_pool_allocator.hpp` 与 `moving_average_pool.hpp`（T2/Cortex-M0+，池存储、无 `operator new`）。无法同时证明上述条件时，改用 `etl::vector<T,N>` 等固定容量容器。
 - **栈**：模板内联与大型局部对象是 C++ 栈膨胀的主因，例如任务栈上的 `etl::vector<T, 256>`。用 `-fstack-usage` + 调用图估算最坏情况，再用运行期水位线（`uxTaskGetStackHighWaterMark`、`k_thread_stack_space_get`）复核。
 - **内存区域**：DMA 可达区、TCM、non-cacheable 区的对象，用 `alignas` + section 属性放置，由类型本身约束对齐（`dma_buffer.hpp`）。
 - **被 ISR/DMA 引用的对象**：必须是静态存储期，或由 RAII 注册对象覆盖其生命周期：构造时注册，析构时注销并等待在途传输结束。
@@ -149,11 +155,12 @@
 | 类别 | 内容 |
 | --- | --- |
 | ✅ 允许 | `<array> <cstdint> <cstddef> <limits> <type_traits> <utility> <optional> <variant> <tuple> <string_view> <initializer_list> <iterator> <ratio> <bit> <span>`(C++20) `<concepts>`(C++20) `<c*>` |
-| ⚠️ 部分允许 | `<algorithm>`（排除会分配的算法）、`<numeric>`（实例化膨胀）、`<atomic>`（见 §7）、`<bitset>`（禁 `to_string`）、`<functional>`（禁 `std::function`）、`<mutex>`（只用 `lock_guard/unique_lock`）、`<new>`（只用 placement new）、`<chrono>`（只用类型与字面量） |
-| ❌ 禁止 | `<vector> <string> <map> <set> <list> <deque> <unordered_*>`、`<iostream>` 等流、`<regex>`、`<thread> <future> <condition_variable>`、`shared_ptr/make_shared`、`<exception> <stdexcept>` |
+| ⚠️ 部分允许 | `<algorithm>`（排除会分配的算法）、`<numeric>`（实例化膨胀）、`<atomic>`（见 §7）、`<bitset>`（禁 `to_string`）、`<functional>`（禁 `std::function`）、`<mutex>`（只用 `lock_guard/unique_lock`）、`<new>`（只用 placement new）、`<chrono>`（只用类型与字面量）；`<vector> <string> <map> <set> <list> <deque> <unordered_*>` 仅 T1/T2 且满足 §6 的有界条件（T0 禁止，默认 `std::allocator` 禁止） |
+| ❌ 禁止 | `<iostream>` 等流、`<regex>`、`<thread> <future> <condition_variable>`、`shared_ptr/make_shared`、`<exception> <stdexcept>` |
 | 替代（默认 ETL） | `etl::vector<T,N>`、`etl::string<N>`、`etl::flat_map`、`etl::circular_buffer`、`etl::delegate`、`etl::inplace_function`、`etl::expected`、`etl::span`、`etl::queue_spsc_isr`、`etl::fsm/hfsm`；配置见 `assets/cpp/templates/etl_profile.h` |
 
 - 已使用 Pigweed 的项目沿用 `pw::Vector`、`pw::InlineString`、`pw::Function`、`pw::Result`，不混用两套。
+- 标准容器按“分配行为”而不是按头文件判断：实例化默认分配器或扩容路径才违规；池分配器 + 编译期容量的有界用法见 §6。T0、ISR 与 RT 路径仍按禁止处理。
 - `std::unique_ptr` + 自定义删除器管理非堆资源（归还池块、释放 DMA 通道）是零开销 RAII，允许使用。
 
 ## 11. 静态分析

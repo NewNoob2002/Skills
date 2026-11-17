@@ -4,7 +4,9 @@
 # 预期结果在运行前写定；首次运行的不一致及处理见 evals/TRIAGE.md。
 project: freertos-cpp
 profile: mcu-rtos
-summary: "C++17 遥测模块（滑动平均 + 纯虚输出接口）：Cortex-M0+ T0 目标构建与 cpp_cost 门禁、CppUTest 单元测试、FreeRTOS POSIX 集成测试。"
+summary: >-
+  C++17 遥测模块（滑动平均 + 纯虚输出接口）：Cortex-M0+ T0 目标构建与 cpp_cost 门禁、
+  T2 池分配器容器样例、CppUTest 单元测试、FreeRTOS POSIX 集成测试。
 checks:
   arch_lint:
     run: "python3 {skill}/scripts/arch_lint.py ."
@@ -22,10 +24,42 @@ checks:
     run: "python3 {skill}/scripts/cpp_cost.py check build/app_m0.elf --tier T0"
     requires: [arm-none-eabi-nm]
     needs: [cross_build]
-    rules: [CPP-001, CPP-002, CPP-003, CPP-004, CPP-005, CPP-006, CPP-007, CPP-008, CPP-009, CPP-011]
+    rules:
+      - CPP-001
+      - CPP-002
+      - CPP-003
+      - CPP-004
+      - CPP-005
+      - CPP-006
+      - CPP-007
+      - CPP-008
+      - CPP-009
+      - CPP-011
+  cross_t2:
+    # T2 样例：std::vector + 固定池分配器，容量编译期固定、构造期一次性预留
+    run: "make -s cross-t2"
+    requires: [arm-none-eabi-g++, make]
+    rules: [CPP-003, CPP-005]
+  cpp_cost_t2:
+    run: "python3 {skill}/scripts/cpp_cost.py check build/app_t2.elf --tier T2"
+    requires: [arm-none-eabi-nm]
+    needs: [cross_t2]
+    rules: [CPP-003, CPP-005]
+  no_default_allocator:
+    # 池分配器不得把默认 operator new/malloc 拉回目标：T2 允许池，不允许默认分配器
+    run: |
+      ! arm-none-eabi-nm -C build/app_t2.elf | \
+        grep -qE '[[:space:]](operator (new|delete)|_?(malloc|free)(_r)?)'
+    requires: [arm-none-eabi-nm, grep]
+    needs: [cross_t2]
+    rules: [CPP-003, CPP-005]
   unit:
     run: "make -s unit CPPUTEST={cpputest}"
-    requires: [g++, make, "{cpputest}/lib/libCppUTest.a", "{cpputest}/lib/libCppUTestExt.a"]
+    requires:
+      - g++
+      - make
+      - "{cpputest}/lib/libCppUTest.a"
+      - "{cpputest}/lib/libCppUTestExt.a"
     rules: [TEST-006]
   rtos_host:
     run: "make -s rtos FREERTOS={freertos}"
@@ -36,11 +70,16 @@ variants:
   good: {}
   bad-std-function:
     violates: [CPP-004]
-    note: "DebugSink 内部用 std::function 保存回调：this 捕获是 location-invariant 且小于 libstdc++ 的 SBO 缓冲，ELF 中没有 operator new；cpp_cost 实际命中 throw_helpers（std::__throw_bad_function_call，operator() 路径）"
+    note: >-
+      DebugSink 内部用 std::function 保存回调：this 捕获是 location-invariant 且小于
+      libstdc++ 的 SBO 缓冲，ELF 中没有 operator new；cpp_cost 实际命中 throw_helpers
+      （std::__throw_bad_function_call，operator() 路径）
     expect: {cpp_cost: FAIL}
   bad-std-vector:
     violates: [CPP-005]
-    note: "滑动平均缓冲改用 std::vector：host 测试行为不变，目标 ELF 拉入 operator new 与 malloc"
+    note: >-
+      滑动平均缓冲改用默认分配器的 std::vector：host 测试行为不变，
+      目标 ELF 拉入 operator new 与 malloc；池分配器有界用法见 good 的 T2 样例
     expect: {cpp_cost: FAIL}
   bad-local-static:
     violates: [CPP-009]
@@ -48,7 +87,9 @@ variants:
     expect: {cpp_cost: FAIL}
   bad-atomic-rmw:
     violates: [CPP-008]
-    note: "ARMv6-M 上 std::atomic<uint32_t>::fetch_add：链接失败（__atomic_fetch_add_4 未定义），cpp_cost 因此被阻塞"
+    note: >-
+      ARMv6-M 上 std::atomic<uint32_t>::fetch_add：链接失败
+      （__atomic_fetch_add_4 未定义），cpp_cost 因此被阻塞
     expect: {cross_build: FAIL, cpp_cost: BLOCKED}
   bad-public-virtual-dtor:
     violates: [CPP-011]
@@ -56,7 +97,9 @@ variants:
     expect: {cpp_cost: FAIL}
   bad-throw:
     violates: [CPP-001]
-    note: "noexcept 函数中 throw：目标构建因 -fno-exceptions 报错；host 构建因 -Wterminate + -Werror 报错"
+    note: >-
+      noexcept 函数中 throw：目标构建因 -fno-exceptions 报错；
+      host 构建因 -Wterminate + -Werror 报错
     expect: {cross_build: FAIL, cpp_cost: BLOCKED, unit: FAIL, rtos_host: FAIL}
   bad-layering:
     violates: [ARCH-001]

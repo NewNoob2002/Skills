@@ -23,7 +23,7 @@
 C++ 部分不简单禁止现代特性，而是按资源等级（T0 极小 MCU … T3 Linux 用户态）和实时路径取舍，取舍依据是在 Cortex-M0+/M4 上实测的 Flash/RAM 增量。
 
 - **几乎免费**：模板、Concepts、CRTP、RAII、`constexpr`、`std::optional/variant/span`，增量都在 0–70 B。
-- **代价大**：异常 +9.9 KB；`std::function`、`std::vector` 各约 +1 KB 并引入堆；iostream 在 newlib-nano 下无法链接。
+- **代价大**：异常 +9.9 KB；`std::function`、默认分配器的 `std::vector` 各约 +1 KB 并引入堆；iostream 在 newlib-nano 下无法链接。
 - **隐性陷阱**：
   - 公有虚析构会拉入 `malloc`。
   - Cortex-M0+ 上 32 位 `std::atomic::fetch_add` 链接失败。

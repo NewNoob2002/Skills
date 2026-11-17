@@ -34,7 +34,7 @@
 | --- | --- | --- | --- | --- |
 | 语言标准 | C++17（C++20 可选） | C++17 基线，C++20 可选 | C++17/20 | C++20/23 |
 | 异常、RTTI | 禁用 | 禁用 | 禁用 | 项目决定；RT 线程与 C 边界内不抛 |
-| 堆 | 禁止 | 仅初始化期，之后锁定 | 池/注入分配器；ISR 与 RT 禁止 | 允许；RT 线程预分配 |
+| 堆 | 禁止 | 仅初始化期（可来自固定池），之后锁定 | 固定池/注入分配器；ISR 与 RT 禁止 | 允许；RT 线程预分配 |
 | `virtual` | 少数边界，须测量 | 运行期选择的边界 | 同 T1 | 自由 |
 | 模板实例化 | 记录实例数，重模板走非模板核心 | 监控 `nm --size-sort` 前 20 | 同 T1 | 自由 |
 | 标准库 | 白名单 | 白名单 + 灰名单 | 白名单 + 灰名单 | 全部（RT 线程除外） |
@@ -65,10 +65,10 @@
 | `std::function` | +1148 B；拉入 `operator new`、`malloc`、`atexit`、`__throw_bad_function_call` | ❌ | ❌ | ❌ | ✅ | ❌ | `etl::delegate`（+72 B）、`etl::inplace_function`（+200 B）、`pw::Function` |
 | 异常 | +9877 B Flash、+460 B RAM；unwinder、RTTI、malloc | ❌ | ❌ | ❌ | ⚠️ | ❌ | `Status`/`Result` |
 | RTTI / `dynamic_cast` | 同层次无 RTTI 为 +252 B，有 RTTI 为 +1276 B | ❌ | ❌ | ❌ | ⚠️ | ❌ | `enum class` 类型标签、`std::variant` |
-| `new`/`delete`/`malloc` | 堆、碎片、非确定时间 | ❌ | ⚠️ | ⚠️ | ✅ | ❌ | T1 仅初始化期（`heap_guard.cpp`）；T2 注入分配器/池 |
+| `new`/`delete`/`malloc` | 堆、碎片、非确定时间 | ❌ | ⚠️ | ⚠️ | ✅ | ❌ | T1 仅初始化期（`heap_guard.cpp`）；T2 注入分配器/固定池；池存储为静态区或调用方提供 |
 | `unique_ptr` + 自定义删除器（非堆资源） | 0 | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | `shared_ptr` | 控制块堆分配 + 原子引用计数 | ❌ | ❌ | ❌ | ⚠️ | ❌ | 单一所有者（R.21） |
-| `std::vector/string/map/list/deque/unordered_*` | `vector` +1030 B；`operator new`、`malloc`、`__throw_length_error` | ❌ | ❌ | ❌ | ✅ | ❌ | `etl::vector<T,N>`（+48 B）、`etl::string<N>`、`etl::flat_map` |
+| `std::vector/string/map/list/deque/unordered_*` | 默认分配器下 `vector` +1030 B；`operator new`、`malloc`、`__throw_length_error` | ❌ | ⚠️ | ⚠️ | ✅ | ❌ | 仅 T1/T2 的有界用法（见下方边界）；否则 `etl::vector<T,N>`（+48 B）、`etl::string<N>`、`etl::flat_map` |
 | `std::array`、`std::span`（C++20）、`std::string_view` | span 求和比 C 指针+长度多 20 B | ✅ | ✅ | ✅ | ✅ | ✅ | C++17 用 `etl::span` |
 | `std::optional` | +44 B | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | `std::variant` + `std::visit` | +60 B（3 种状态） | ✅ | ✅ | ✅ | ✅ | ✅ | 状态机；T0 也可用 `enum` + `switch` |
@@ -88,6 +88,16 @@
 | 用户自定义字面量（单位） | 0 | ✅ | ✅ | ✅ | ✅ | ✅ | 放在命名空间中 |
 | 指定初始化器（C++20） | 0 | ✅ | ✅ | ✅ | ✅ | ✅ | 按声明顺序，不与普通初始化混用 |
 | LTO | 体积可能减小；与链接脚本放置、调试冲突 | ⚠️ | ⚠️ | ⚠️ | ⚠️ | — | 只在空间不足时开启，并完整回归 |
+
+**堆与标准容器的边界**：T1/T2 放宽的是“有界、构造期预分配、运行期不扩容”的容器用法，不是给默认分配器开口子。同时满足以下条件才允许 `std::vector<T, PoolAllocator>` 之类的组合：
+
+1. 容量在编译期确定（模板参数或 `constexpr`），并由容器/分配器强制上界；
+2. 存储来自固定池、静态区或调用方提供的块，分配器不得在 `allocate()` 内调用 `malloc/new`；
+3. 构造或初始化期一次性预留（`reserve`/带大小的构造），此后不调用 `push_back`/`resize`/`insert` 等可能扩容的 API；需要写入时用已预留的索引/迭代器；
+4. 分配失败路径显式且有界（`-fno-exceptions` 下不得依赖 `bad_alloc` 展开；中止/锁存并记录），并经过 review；
+5. ISR 与 RT 路径仍禁止；T1 的分配只发生在初始化期，之后锁定；T2 的池也不得在 RT 路径中分配。
+
+`#include <vector>` 本身不产生代码；违规点是默认 `std::allocator`、运行期扩容路径的实例化/调用，以及无法证明上界的容器。任一条无法证明时，改用 ETL/Pigweed 固定容量容器。`std::map`/`unordered_*` 还需要逐节点池并禁止 rehash，通常不值得，默认仍用 `etl::flat_map`。
 
 ### 多态方式选择
 

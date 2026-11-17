@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Agent 行为评测：在装有技能的沙箱仓库中运行 Claude Code / Codex，按 evals/agent/cases.yaml 判定。
+"""Agent 行为评测：在装有技能的沙箱仓库中运行被测 Agent，按 evals/agent/cases.yaml 判定。
 
 用法：
-  python3 tools/run_agent_evals.py [--agents claude,codex] [--cases T01,G01] [--jobs 3] [--repeat N]
-                                   [--judge-model MODEL] [--no-judge] [--report FILE]
+  python3 tools/run_agent_evals.py [--agents omp-gpt,omp-deepseek] [--cases T01,G01] [--jobs 3] [--repeat N]
+                                   [--judges omp:MODEL,agy:MODEL] [--no-judge] [--report FILE]
+
+被测 Agent：claude（Claude Code）、codex（Codex CLI），以及经 omp 运行的 omp-gpt（codex/gpt-6.1-sol，thinking
+medium）与 omp-deepseek（DeepSeek V4.1 Flash，thinking high）。omp 只开放 read/grep/glob 工具，只发现本技能。
 
 判定分两层：
   确定性检查   技能是否被读取/调用（expect_skill）、回答必须包含的内容、不得出现的说法
-  评委检查     rubric 逐条交给独立评委模型（默认 omp 的 Gemini 4 Argon，与两个被测 Agent 不同厂商）
+  评委检查     rubric 逐条交给评委组交叉评审（默认 omp 的 DeepSeek V4.1 Flash thinking high + agy 的
+               Gemini 3.8 Flash high）；任一评委判 FAIL 即 FAIL，全部 PASS 才 PASS，其余为无可用结论；
+               报告给出两评委结论一致率
 
 --repeat N 让每个用例每个 Agent 运行 N 次（互相独立），报告给出每个用例的通过次数与总体通过率的
 Wilson 95% 区间。用例可写 setup（shell 命令），在该用例独享的沙箱副本中、提交前执行（例如生成构建产物）。
@@ -42,7 +47,17 @@ REPO = Path(__file__).resolve().parent.parent
 CASES = REPO / "evals" / "agent" / "cases.yaml"
 RUNS = REPO / "evals" / "agent" / "runs"
 SKILL_NAME = "embedded-engineering"
-DEFAULT_JUDGE = "magpie/antigravity/gemini-4-argon"
+DEFAULT_JUDGE = "magpie/antigravity/gemini-4-argon"  # 历史单评委默认值，仅 --judge-model 显式使用时生效
+# 交叉评审：两个评委来自不同厂商，与被测模型（GPT、DeepSeek）至少有一个不同源
+DEFAULT_JUDGES = "omp:workbuddy/deepseek-v4.1-flash,agy:gemini-3.8-flash-high"
+# omp 运行的被测 Agent：模型与 thinking 显式固定，避免随 ~/.omp 配置漂移
+OMP_AGENTS = {
+    "omp-gpt": {"model": "codex/gpt-6.1-sol", "thinking": "medium"},
+    "omp-deepseek": {"model": "workbuddy/deepseek-v4.1-flash", "thinking": "high"},
+}
+# 被测 Agent 的可执行文件与 install.sh 安装目标（omp 发现 .agents/skills，与 codex 相同）
+AGENT_BIN = {name: "omp" for name in OMP_AGENTS}
+INSTALL_AS = {name: "codex" for name in OMP_AGENTS}
 # 显式固定被测模型：--setting-sources project 不读取用户设置，未指定时 CLI 会回落到自身默认模型，
 # 与历史基线（claude-opus-5-5）不一致，结果不可比
 DEFAULT_CLAUDE_MODEL = "claude-opus-5-5"
@@ -89,7 +104,7 @@ def make_sandbox(agent: str, sandbox_project: str, root: Path, setup: str | None
     subprocess.run(git[:3] + ["init", "-q"], check=True)
     subprocess.run(git + ["add", "-A"], check=True)
     subprocess.run(git + ["commit", "-qm", "sandbox"], check=True)
-    subprocess.run(["sh", str(REPO / "install.sh"), "--agent", agent, "--project-dir", str(repo)],
+    subprocess.run(["sh", str(REPO / "install.sh"), "--agent", INSTALL_AS.get(agent, agent), "--project-dir", str(repo)],
                    check=True, capture_output=True)
     return repo
 
@@ -174,7 +189,54 @@ def parse_codex(stdout: str) -> dict:
     return {"final": final, "skill_used": skill, "tools": tools, "usage": usage}
 
 
-RUNNERS = {"claude": run_claude, "codex": run_codex}
+def run_omp(prompt: str, repo: Path, raw: Path, timeout: int, model: str | None = None,
+            thinking: str | None = None) -> dict:
+    # 只读：仅开放 read/grep/glob；只发现本技能；不加载用户级规则、上下文文件与扩展，结果不受本机配置影响
+    cmd = ["omp", "-p", "--mode", "json", "--no-session", "--no-rules", "--no-context-files", "--no-extensions",
+           "--skills", SKILL_NAME, "--tools", "read,grep,glob"]
+    if model:
+        cmd += ["--model", model]
+    if thinking:
+        cmd += ["--thinking", thinking]
+    # stdin 必须关闭：omp -p 会等待管道输入
+    proc = subprocess.run(cmd + [prompt], cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                          timeout=timeout, check=False)
+    raw.write_text(proc.stdout, encoding="utf-8")
+    requested = " ".join(x for x in (model, thinking and f"thinking={thinking}") if x) or None
+    return {"exit_code": proc.returncode, **parse_omp(proc.stdout), "model_requested": requested,
+            "stderr_tail": proc.stderr.strip().splitlines()[-5:]}
+
+
+def parse_omp(stdout: str) -> dict:
+    """解析 omp -p --mode json 的事件流（JSONL）。"""
+    tools, final, cost, skill, model = [], "", None, False, None
+    for line in stdout.splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") == "tool_execution_start":
+            blob = json.dumps(ev.get("args", {}), ensure_ascii=False)
+            tools.append(f"{ev.get('toolName')} {blob[:100]}")
+            # omp 用 skill://<name> 读取技能；直接读取技能目录下的文件也算使用
+            if f"skill://{SKILL_NAME}" in blob or f"skills/{SKILL_NAME}/" in blob:
+                skill = True
+        elif ev.get("type") == "agent_end":
+            msgs = [m for m in ev.get("messages", []) if isinstance(m, dict) and m.get("role") == "assistant"]
+            if msgs:
+                last = msgs[-1]
+                final = "".join(c.get("text", "") for c in last.get("content", [])
+                                if isinstance(c, dict) and c.get("type") == "text")
+                model = last.get("model")
+            costs = [((m.get("usage") or {}).get("cost") or {}).get("total") for m in msgs]
+            if any(isinstance(c, (int, float)) for c in costs):
+                cost = sum(c for c in costs if isinstance(c, (int, float)))
+    return {"final": final, "skill_used": skill, "tools": tools, "cost_usd": cost, "model": model}
+
+
+RUNNERS = {"claude": run_claude, "codex": run_codex, **{name: run_omp for name in OMP_AGENTS}}
 
 
 # --------------------------------------------------------------------------- 判定
@@ -214,26 +276,92 @@ JUDGE_PROMPT = """你是独立评审。下面是用户给一个编程 Agent 的�
 """
 
 
-def judge(case: dict, run: dict, model: str, timeout: int) -> dict:
+def judge_prompt(case: dict, run: dict) -> str:
     rubric = "\n".join(f"{i}. {r}" for i, r in enumerate(case["rubric"], 1))
-    prompt = JUDGE_PROMPT.format(prompt=case["prompt"], rubric=rubric, answer=run["final"][:12000])
+    return JUDGE_PROMPT.format(prompt=case["prompt"], rubric=rubric, answer=run["final"][:12000])
+
+
+def parse_items(text: str, n: int) -> list | None:
+    """取出评委 JSON 的 items；条数不符、序号不是 1..n 或 pass 不是布尔值时返回 None（不能当作结论）。"""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    try:
+        items = json.loads(match.group(0))["items"] if match else None
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(items, list) or len(items) != n:
+        return None
+    if not all(isinstance(i, dict) and isinstance(i.get("pass"), bool) for i in items):
+        return None
+    if sorted(i.get("index") for i in items if isinstance(i.get("index"), int)) != list(range(1, n + 1)):
+        return None
+    return items
+
+
+def verdict_from(items: list | None, raw: str, label: dict) -> dict:
+    if items is None:
+        return {"status": BLOCKED, "reason": "judge output not parseable", "raw": raw[-800:], **label}
+    return {"status": PASS if all(i["pass"] for i in items) else FAIL, "items": items, **label}
+
+
+def judge(case: dict, run: dict, model: str, timeout: int) -> dict:
+    """omp 评委（thinking high，无工具、无技能）。"""
+    label = {"model": model, "thinking": "high", "kind": "omp"}
     cmd = ["omp", "-p", "--model", model, "--thinking", "high", "--no-tools", "--no-session", "--no-skills",
-           "--no-rules", "--no-context-files", "--no-extensions", prompt]
+           "--no-rules", "--no-context-files", "--no-extensions", judge_prompt(case, run)]
     try:
         proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
                               check=False, cwd=tempfile.gettempdir())
     except subprocess.TimeoutExpired:
-        return {"status": BLOCKED, "reason": "judge timeout", "model": model, "thinking": "high"}
-    match = re.search(r"\{.*\}", proc.stdout, re.DOTALL)
+        return {"status": BLOCKED, "reason": "judge timeout", **label}
+    return verdict_from(parse_items(proc.stdout, len(case["rubric"])), proc.stdout, label)
+
+
+def judge_agy(case: dict, run: dict, model: str, timeout: int) -> dict:
+    """agy（Antigravity CLI）评委；模型名自带推理档位（如 gemini-3.8-flash-high）。"""
+    label = {"model": model, "thinking": model.rsplit("-", 1)[-1], "kind": "agy"}
     try:
-        items = json.loads(match.group(0))["items"] if match else None
-    except (ValueError, KeyError, TypeError):
-        items = None
-    if not isinstance(items, list) or len(items) != len(case["rubric"]):
-        return {"status": BLOCKED, "reason": "judge output not parseable", "raw": proc.stdout[-800:],
-                "model": model, "thinking": "high"}
-    return {"status": PASS if all(bool(i.get("pass")) for i in items) else FAIL, "items": items,
-            "model": model, "thinking": "high"}
+        # 空目录作为工作区，评委无项目文件可读
+        with tempfile.TemporaryDirectory(prefix="agy-judge-") as cwd:
+            proc = subprocess.run(["agy", "--model", model, "--output-format", "json", "--disable-slash-commands",
+                                   "-p", judge_prompt(case, run)], stdin=subprocess.DEVNULL, capture_output=True,
+                                  text=True, timeout=timeout, check=False, cwd=cwd)
+    except subprocess.TimeoutExpired:
+        return {"status": BLOCKED, "reason": "judge timeout", **label}
+    try:
+        outer = json.loads(proc.stdout)
+    except ValueError:
+        outer = None
+    if not isinstance(outer, dict) or outer.get("status") != "SUCCESS":
+        return {"status": BLOCKED, "reason": "agy did not succeed", "raw": proc.stdout[-800:], **label}
+    text = str(outer.get("response", ""))
+    return verdict_from(parse_items(text, len(case["rubric"])), text, label)
+
+
+def parse_judges(spec: str) -> list[tuple[str, str]]:
+    judges = []
+    for part in (p.strip() for p in spec.split(",") if p.strip()):
+        kind, _, model = part.partition(":")
+        if kind not in ("omp", "agy") or not model:
+            raise ValueError(f"bad judge spec {part!r}; expected omp:MODEL or agy:MODEL")
+        judges.append((kind, model))
+    if not judges:
+        raise ValueError("no judges given")
+    return judges
+
+
+def judge_panel(case: dict, run: dict, judges: list[tuple[str, str]], timeout: int) -> dict:
+    """交叉评审。单评委时直接返回其结论；多评委时任一 FAIL 即 FAIL，全部 PASS 才 PASS，其余 BLOCKED。"""
+    panel = [(judge if kind == "omp" else judge_agy)(case, run, model, timeout) for kind, model in judges]
+    if len(panel) == 1:
+        return panel[0]
+    statuses = [j["status"] for j in panel]
+    status = FAIL if FAIL in statuses else PASS if all(s == PASS for s in statuses) else BLOCKED
+    usable = all(s in (PASS, FAIL) for s in statuses)
+    result = {"status": status, "panel": panel, "model": " + ".join(f"{k}:{m}" for k, m in judges),
+              "agree": (len(set(statuses)) == 1) if usable else None}
+    if status == BLOCKED:
+        result["reason"] = "judge panel incomplete"
+    return result
 
 
 def combine(det_ok: bool, jstat: str) -> str:
@@ -244,7 +372,8 @@ def combine(det_ok: bool, jstat: str) -> str:
     return NOT_RUN  # 确定性检查通过，但评委没有给出可用结论
 
 
-def rejudge(report: dict, cases: dict, model: str, timeout: int, jobs: int, everything: bool = False) -> int:
+def rejudge(report: dict, cases: dict, model: str, timeout: int, jobs: int, everything: bool = False,
+            judges: list[tuple[str, str]] | None = None) -> int:
     """重新评审；返回重新评审的条数。everything 为 True 时重评全部有 rubric 的记录并保留原结论。"""
     # 旧报告没有逐条记录评委模型：先用顶层模型补齐，避免部分重评后把旧结论归给新评委
     prior = report.get("judge_model")
@@ -259,7 +388,8 @@ def rejudge(report: dict, cases: dict, model: str, timeout: int, jobs: int, ever
             prev = dict(rec["judge"])
             prev.setdefault("model", report.get("judge_model"))
             rec["judge_prev"] = prev
-        rec["judge"] = judge(cases[rec["id"]], rec["run"], model, timeout)
+        rec["judge"] = (judge_panel(cases[rec["id"]], rec["run"], judges, timeout) if judges
+                        else judge(cases[rec["id"]], rec["run"], model, timeout))
         rec["status"] = combine(all(c["pass"] for c in rec.get("checks", [])), rec["judge"]["status"])
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
@@ -278,10 +408,14 @@ def rejudge(report: dict, cases: dict, model: str, timeout: int, jobs: int, ever
 def evaluate(agent: str, case: dict, repo: Path, outdir: Path, args, rep: int = 1) -> dict:
     raw = outdir / agent / (f"{case['id']}.jsonl" if rep == 1 else f"{case['id']}-r{rep}.jsonl")
     raw.parent.mkdir(parents=True, exist_ok=True)
+    # 单次运行（Agent + 评委）约 1 分钟，开始时就打印，避免长时间无输出
+    print(f"start {agent}/{case['id']}#{rep}", flush=True)
     start = time.monotonic()
     try:
         if agent == "claude":
             extra = {"model": getattr(args, "claude_model", None) or None}
+        elif agent in OMP_AGENTS:
+            extra = dict(OMP_AGENTS[agent])
         else:
             extra = {"model": getattr(args, "codex_model", None) or None,
                      "effort": getattr(args, "codex_effort", None) or None}
@@ -301,7 +435,9 @@ def evaluate(agent: str, case: dict, repo: Path, outdir: Path, args, rep: int = 
         if args.no_judge:
             record["judge"] = {"status": NOT_RUN, "reason": "--no-judge"}
         else:
-            record["judge"] = judge(case, run, args.judge_model, args.timeout)
+            judges = getattr(args, "judges", None)
+            record["judge"] = (judge_panel(case, run, judges, args.timeout) if judges
+                               else judge(case, run, args.judge_model, args.timeout))
         record["status"] = combine(det_ok, record["judge"]["status"])
     else:
         record["status"] = PASS if det_ok else FAIL
@@ -346,9 +482,14 @@ def summarize(records: list[dict], cases: list[dict]) -> dict:
 def failed_checks(rec: dict) -> list[str]:
     failed = [f"{c['check']}: {c['detail']}" for c in rec.get("checks", []) if not c["pass"]]
     jd = rec.get("judge") or {}
-    for item in jd.get("items", []) or []:
-        if not item.get("pass"):
-            failed.append(f"rubric {item.get('index')}: {str(item.get('reason', ''))[:80]}")
+    members = jd.get("panel") or [jd]
+    for member in members:
+        who = f"[{member.get('kind')}] " if jd.get("panel") else ""
+        for item in member.get("items", []) or []:
+            if not item.get("pass"):
+                failed.append(f"{who}rubric {item.get('index')}: {str(item.get('reason', ''))[:80]}")
+        if jd.get("panel") and member.get("status") == BLOCKED:
+            failed.append(f"{who}judge BLOCKED: {member.get('reason', '')}")
     if jd.get("status") in (NOT_RUN, BLOCKED):
         failed.append(f"judge {jd['status']}: {jd.get('reason', '')}")
     if rec.get("reason"):
@@ -375,6 +516,12 @@ def render(report: dict, cases: list[dict]) -> str:
         requested = sorted({x["model_requested"] for x in runs if x.get("model_requested")})
         head = ([f"实际模型：`{' + '.join(models)}`。", ""] if models else
                 [f"请求模型（CLI 不回报实际模型）：`{' + '.join(requested)}`。", ""] if requested else [])
+        paneled = [r["judge"] for r in report["records"] if r["agent"] == agent
+                   and isinstance(r.get("judge"), dict) and r["judge"].get("panel")]
+        if paneled:
+            both = [j for j in paneled if j.get("agree") is not None]
+            agree = sum(bool(j["agree"]) for j in both)
+            head += [f"评委交叉一致：{agree}/{len(both)} 条结论一致（另有 {len(paneled) - len(both)} 条至少一位评委无结论）。", ""]
         lines += [f"## {agent}", ""] + head + [
                   f"PASS {s[PASS]}，FAIL {s[FAIL]}，NOT_RUN {s[NOT_RUN]}，BLOCKED {s[BLOCKED]}"
                   + (f"（通过率 {s[PASS]}/{total}，95% 区间 {lo:.0%}–{hi:.0%}）" if repeat > 1 else "")
@@ -410,19 +557,23 @@ def render(report: dict, cases: list[dict]) -> str:
 def git_commit() -> str:
     out = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True,
                          text=True, check=False).stdout.strip()
-    dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain", "--", "skills"],
+    # 被测技能、用例与评测脚本任一改动都会影响结果
+    dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain", "--", "skills", "evals/agent/cases.yaml",
+                            "tools/run_agent_evals.py", "install.sh"],
                            capture_output=True, text=True, check=False).stdout.strip()
     return (out + ("-dirty" if dirty else "")) or "unknown"
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
-    ap.add_argument("--agents", default="claude,codex")
+    ap.add_argument("--agents", default="omp-gpt,omp-deepseek",
+                    help="comma-separated: claude, codex, " + ", ".join(OMP_AGENTS))
     ap.add_argument("--cases", default="", help="comma-separated case ids (default: all)")
     ap.add_argument("--jobs", type=int, default=3)
     ap.add_argument("--repeat", type=int, default=1, help="independent runs per case and agent")
     ap.add_argument("--timeout", type=int, default=600)
-    ap.add_argument("--judge-model", default=DEFAULT_JUDGE)
+    ap.add_argument("--judges", default=DEFAULT_JUDGES, help=f"judge panel, kind:model list (default: {DEFAULT_JUDGES})")
+    ap.add_argument("--judge-model", default=None, help="single omp judge model (overrides --judges; legacy runs)")
     ap.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"model passed to claude -p (default: {DEFAULT_CLAUDE_MODEL}; empty string: CLI default)")
     ap.add_argument("--codex-model", default=DEFAULT_CODEX_MODEL,
@@ -445,11 +596,17 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, KeyError, yaml.YAMLError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    try:
+        args.judges = [("omp", args.judge_model)] if args.judge_model else parse_judges(args.judges)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    args.judge_model = " + ".join(f"{k}:{m}" for k, m in args.judges)
     if args.rejudge:
         summary = args.rejudge / "summary.json"
         report = json.loads(summary.read_text(encoding="utf-8"))
         by_id = {c["id"]: c for c in data["cases"]}
-        n = rejudge(report, by_id, args.judge_model, args.timeout, args.jobs, args.rejudge_all)
+        n = rejudge(report, by_id, args.judge_model, args.timeout, args.jobs, args.rejudge_all, args.judges)
         run_cases = [by_id[i] for i in dict.fromkeys(r["id"] for r in report["records"]) if i in by_id]
         report["summary"] = summarize(report["records"], run_cases)
         summary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -464,8 +621,9 @@ def main(argv: list[str] | None = None) -> int:
         if agent not in RUNNERS:
             print(f"error: unknown agent {agent}", file=sys.stderr)
             return 2
-    if not args.no_judge and shutil.which("omp") is None:
-        print("warning: omp not found; rubric checks will be NOT_RUN", file=sys.stderr)
+    missing = sorted({k for k, _ in args.judges if shutil.which(k) is None})
+    if not args.no_judge and missing:
+        print(f"warning: judge CLI not found ({', '.join(missing)}); rubric checks will be NOT_RUN", file=sys.stderr)
         args.no_judge = True
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -474,7 +632,7 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="agent-eval-") as tmp:
         repos = {}
         for agent in agents:
-            if shutil.which(agent) is None:
+            if shutil.which(AGENT_BIN.get(agent, agent)) is None:
                 records += [{"agent": agent, "id": c["id"], "category": c["category"], "rep": r,
                              "status": NOT_RUN, "reason": f"{agent} CLI not found"}
                             for c in cases for r in range(1, args.repeat + 1)]
@@ -496,11 +654,12 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                 jobs += [(agent, case, repo, r) for r in range(1, args.repeat + 1)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            print(f"queued {len(jobs)} runs, {args.jobs} in parallel; raw logs: {outdir}", flush=True)
             futures = [pool.submit(evaluate, a, c, repo, outdir, args, r) for a, c, repo, r in jobs]
-            for fut in concurrent.futures.as_completed(futures):
+            for done, fut in enumerate(concurrent.futures.as_completed(futures), 1):
                 rec = fut.result()
                 records.append(rec)
-                print(f"{rec['agent']}/{rec['id']}#{rec.get('rep', 1)}: {rec['status']}  skill_used="
+                print(f"[{done}/{len(jobs)}] {rec['agent']}/{rec['id']}#{rec.get('rep', 1)}: {rec['status']}  skill_used="
                       f"{(rec.get('run') or {}).get('skill_used')}", flush=True)
     order = {c["id"]: i for i, c in enumerate(cases)}
     records.sort(key=lambda r: (r["agent"], order[r["id"]], r.get("rep", 1)))
@@ -508,6 +667,7 @@ def main(argv: list[str] | None = None) -> int:
               "judge_model": None if args.no_judge else args.judge_model, "repeat": args.repeat,
               "claude_model": args.claude_model if "claude" in agents else None,
               "codex_model": f"{args.codex_model} effort={args.codex_effort}" if "codex" in agents else None,
+              "omp_agents": {a: OMP_AGENTS[a] for a in agents if a in OMP_AGENTS} or None,
               "records": records,
               "summary": summarize(records, cases)}
     outdir.mkdir(parents=True, exist_ok=True)

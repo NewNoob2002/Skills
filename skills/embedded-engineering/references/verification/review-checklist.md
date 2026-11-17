@@ -68,7 +68,7 @@
 - [ ] 全局对象 `constinit`/`constexpr` 构造；构造函数不访问硬件；硬件在显式 `init()` 中初始化
 - [ ] 无 ISR 中首次触达的函数局部静态；无动态初始化的 Meyers 单例（T0）
 - [ ] 多态基类为受保护非虚析构 + `final` 实现；`virtual` 只在运行期选择的边界
-- [ ] 无 `std::function`、`std::vector/string/map`、iostream、异常、RTTI（T0–T2）
+- [ ] 无 `std::function`、iostream、异常、RTTI（T0–T2）；标准容器按 [coding.md](../cpp/coding.md) 的内存与容器边界审查：T0 禁止会分配的容器，T1/T2 仅允许池/注入分配器且容量编译期固定、初始化期预留、运行期不扩容，默认 `std::allocator` 禁止
 - [ ] 原子类型有 `static_assert(is_always_lock_free)`；ARMv6-M 与 64 位用临界区
 - [ ] 无 `volatile` 复合运算（C++20）；`volatile` 只用于 MMIO/DMA 描述符
 - [ ] ISR 向量 `extern "C"` 且名字与启动文件一致；C 回调用 `noexcept` 蹦床；跨边界类型为标准布局

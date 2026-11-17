@@ -1,3 +1,5 @@
+# yamllint disable rule:line-length
+# 规则字段含中文说明与引用，长行是数据内容；不要按散文折行。
 # embedded-engineering 规则库（机器可读）
 #
 # 收录范围：能被工具检查的规则、跨生态有冲突的规则、需要在审查/验证样例中按 ID 引用的规则。
@@ -19,6 +21,7 @@
 #
 # 由 tools/validate_skill.py 的 rules 检查校验结构、引用与冲突对称性。
 
+---
 version: 1
 
 profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf, linux-kernel, linux-userspace]
@@ -792,19 +795,22 @@ rules:
       coverage: full
 
   - id: CPP-003
-    title: "堆：T0 禁止；T1 仅初始化期并随后锁定；T2 注入分配器或池；ISR 与 RT 路径禁止"
+    title: "堆：T0 禁止；T1 仅初始化期；T2 固定池/注入分配器；ISR/RT 禁止"
     level: mandatory
     profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [pigweed, core-guidelines]
     ref: [references/cpp/coding.md §6, references/cpp/features.md §2]
-    except: "zephyr profile 以 ZEP-007（不使用动态内存）为准"
+    except: "zephyr 驱动/内核/SYS_INIT 以 ZEP-007 为准；应用层显式启用 k_heap 时按 T2 条件审查"
     verify:
       method: auto
       tool: cpp_cost
       check: heap
       coverage: partial
-      gap: "cpp_cost 在 T1/T2 对 heap 符号仅告警（warn），且符号表无法区分初始化期分配与 ISR/RT 路径中的 malloc/new，需结合源码 review 与运行期 heap_guard"
+      gap: >-
+        cpp_cost 在 T1/T2 仅告警，无法区分初始化期分配与 ISR/RT 路径；
+        池分配路径调用 malloc/new 或存储不来自静态区/调用方时仍按堆处理；
+        需结合源码 review 与运行期 heap_guard
     conflicts: [ZEP-007]
 
   - id: CPP-004
@@ -823,19 +829,22 @@ rules:
     cost: "std::function +1148 B 并拉入 malloc、atexit；etl::delegate +72 B"
 
   - id: CPP-005
-    title: "T0–T2 不用会分配的标准容器（vector/string/map/list/deque/unordered_*），用 ETL 固定容量容器"
+    title: "T0 不用会分配的标准容器；T1/T2 仅限有界池/注入分配器容器；默认 ETL"
     level: mandatory
     profiles: [mcu-baremetal, mcu-rtos, zephyr, esp-idf]
     lang: [cpp]
     source: [etl, measured]
     ref: references/cpp/features.md §3
+    when: "T1/T2：容量编译期确定、存储来自固定池/注入分配器、初始化期一次性预留、运行期不扩容"
     verify:
       method: auto
       tool: cpp_cost
       check: heap
       coverage: partial
-      gap: "T1/T2 下 heap 与 T2 下 throw_helpers 均为 warn（退出码 0），不能单独代表标准容器类型禁令，需源码 review #include 与容器类型"
-    cost: "std::vector +1030 B；etl::vector<T,N> +48 B 但容量在编译期固定"
+      gap: >-
+        T1/T2 heap 与 T2 throw_helpers 仅告警；需 review 容器类型、allocator、
+        容量上界及扩容 API；默认 std::allocator、T0、ISR/RT 仍禁止
+    cost: "std::vector 默认分配器 +1030 B；etl::vector<T,N> +48 B；池分配器容器增量取决于池存储，未单独测量"
 
   - id: CPP-006
     title: "T0–T2 不用 iostream"
@@ -1086,6 +1095,7 @@ rules:
     lang: [c, cpp]
     source: [zephyr]
     ref: [references/platforms/zephyr.md §2, references/platforms/zephyr.md §3]
+    except: "驱动/内核/SYS_INIT 一律不使用动态内存；应用层经项目显式批准使用 k_heap/k_mem_slab 时，按 CPP-003 的 T2 条件（固定容量、初始化期、不扩容、非 ISR/RT）审查"
     verify:
       method: review
     conflicts: [CPP-003]

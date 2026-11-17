@@ -8,11 +8,17 @@ STRICT := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wold
 TARGET := -mcpu=cortex-m0plus -mthumb -mfloat-abi=soft -std=c++17 -Os -fno-exceptions -fno-rtti \
           -fno-use-cxa-atexit -ffunction-sections -fdata-sections
 TSRC   := app/app_main.cpp module/telemetry/telemetry.cpp bsp/adc.cpp
+TSRC_T2 := app/app_main_t2.cpp
 
-.PHONY: cross unit rtos format
+.PHONY: cross cross-t2 unit rtos format
 cross:
 	mkdir -p build
 	arm-none-eabi-g++ $(TARGET) $(STRICT) $(INCS) $(TSRC) -Wl,--gc-sections --specs=nano.specs --specs=nosys.specs -o build/app_m0.elf
+
+# T2 样例：池分配器容器的有界用法；TARGET 的 CPU/异常/RTTI 配置与主目标一致
+cross-t2:
+	mkdir -p build
+	arm-none-eabi-g++ $(TARGET) $(STRICT) $(INCS) $(TSRC_T2) -Wl,--gc-sections --specs=nano.specs --specs=nosys.specs -o build/app_t2.elf
 
 unit:
 	mkdir -p build

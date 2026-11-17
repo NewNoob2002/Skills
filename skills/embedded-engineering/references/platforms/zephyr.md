@@ -35,7 +35,7 @@
 - `DEVICE_DT_GET` 本身不保证节点 `status = "okay"`，也不保证存在已初始化设备；未生成设备对象时可能报 `__device_dts_ord_*` 链接错误，不能概括为“返回空指针或桩驱动”（[设备模型 API](https://docs.zephyrproject.org/latest/doxygen/html/group__device__model.html)）。
 - **错误码**：函数返回 `int`，0 成功，负 errno 失败；调用者检查并传播。
 - **驱动**：实现子系统 API 结构体（新版本用 `DEVICE_API(<subsys>, ...)`），用 `DEVICE_DT_INST_DEFINE` 与 `DT_INST_FOREACH_STATUS_OKAY` 实例化；`static` 配置结构体放 ROM。
-- **驱动不做动态内存分配**（`ZEP-007`，Dir 4.12）：不用 `malloc`/`calloc`/`k_malloc`/`k_heap_alloc` 分配接收/发送缓冲区或私有数据。缓冲区放在每实例的 `struct <drv>_data` 里（随 `DEVICE_DT_INST_DEFINE` 静态分配），长度取自 devicetree 属性或 Kconfig 常量；需要多个固定大小块时用 `K_MEM_SLAB_DEFINE`（确定性的定长块池），队列用 `K_MSGQ_DEFINE`/`ring_buf`（`RING_BUF_DECLARE`）。被问到“驱动里能不能 malloc”时，先明确回答不应该，再给静态方案；只有应用层且项目明确允许时才讨论 `k_heap`。
+- **驱动不做动态内存分配**（`ZEP-007`，Dir 4.12）：不用 `malloc`/`calloc`/`k_malloc`/`k_heap_alloc` 分配接收/发送缓冲区或私有数据。缓冲区放在每实例的 `struct <drv>_data` 里（随 `DEVICE_DT_INST_DEFINE` 静态分配），长度取自 devicetree 属性或 Kconfig 常量；需要多个固定大小块时用 `K_MEM_SLAB_DEFINE`（确定性的定长块池），队列用 `K_MSGQ_DEFINE`/`ring_buf`（`RING_BUF_DECLARE`）。被问到“驱动里能不能 malloc”时，先明确回答不应该，再给静态方案；只有应用层且项目明确允许时才讨论 `k_heap`，并按 CPP-003 的 T2 条件（固定容量、初始化期、不扩容、非 ISR/RT）审查。
 - 缓冲区长度取自 binding 明确定义的长度属性或 Kconfig；`dmas` 是 DMA 控制器及通道等 specifier，不是缓冲区字节数。多实例驱动按 `inst` 定义各自缓冲区及容量，不能把所有实例的长度固定为 `DT_INST_PROP(0, ...)`（[binding 属性](https://docs.zephyrproject.org/latest/build/dts/bindings-syntax.html)、[多实例驱动](https://docs.zephyrproject.org/latest/build/dts/howtos.html#write-device-drivers-using-devicetree-apis)）。
 - **ISR**：`IRQ_CONNECT()`/`irq_enable()` 或驱动框架回调；ISR 中只用 ISR 安全 API（`k_sem_give`、`k_msgq_put(..., K_NO_WAIT)`、`k_work_submit`、`k_poll_signal_raise`），不阻塞；工作推迟到 `k_work`/线程。
 - **内核对象静态定义**：`K_THREAD_DEFINE`、`K_MSGQ_DEFINE`、`K_SEM_DEFINE`、`K_MUTEX_DEFINE`。

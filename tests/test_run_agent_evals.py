@@ -182,6 +182,65 @@ class JudgeParseTest(unittest.TestCase):
             self.assertEqual(ra.judge(case, {"final": "x"}, "m", 5)["status"], "BLOCKED")
 
 
+class OmpAndPanelTest(unittest.TestCase):
+    def test_parse_omp_skill_final_model_cost(self):
+        events = [
+            {"type": "tool_execution_start", "toolName": "read", "args": {"path": "skill://embedded-engineering"}},
+            {"type": "agent_end", "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "q"}]},
+                {"role": "assistant", "model": "m1", "usage": {"cost": {"total": 0.25}},
+                 "content": [{"type": "thinking", "thinking": "t"}, {"type": "text", "text": "答"}]}]},
+        ]
+        out = ra.parse_omp("\n".join(json.dumps(e) for e in events) + "\nnot json\n")
+        self.assertEqual((out["skill_used"], out["final"], out["model"], out["cost_usd"]), (True, "答", "m1", 0.25))
+        self.assertFalse(ra.parse_omp(json.dumps({"type": "tool_execution_start", "toolName": "read",
+                                                  "args": {"path": "skill://other"}}))["skill_used"])
+
+    def test_omp_runner_is_read_only_and_pinned(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(ra.subprocess, "run", return_value=SimpleNamespace(
+                    stdout="", stderr="", returncode=0)) as run:
+            out = ra.run_omp("p", Path(tmp), Path(tmp) / "raw.jsonl", 5, model="codex/gpt-6.1-sol", thinking="medium")
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "read,grep,glob")
+        self.assertEqual(cmd[cmd.index("--thinking") + 1], "medium")
+        self.assertIs(run.call_args.kwargs["stdin"], ra.subprocess.DEVNULL)
+        self.assertEqual(out["model_requested"], "codex/gpt-6.1-sol thinking=medium")
+
+    def test_agy_judge_parses_response(self):
+        case = {"prompt": "p", "rubric": ["a"]}
+        ok = json.dumps({"status": "SUCCESS", "response": '{"items": [{"index": 1, "pass": true}]}'})
+        with mock.patch.object(ra.subprocess, "run", return_value=SimpleNamespace(stdout=ok, returncode=0)):
+            self.assertEqual(ra.judge_agy(case, {"final": "x"}, "gemini-3.8-flash-high", 5)["status"], "PASS")
+        bad = json.dumps({"status": "ERROR", "response": ""})
+        with mock.patch.object(ra.subprocess, "run", return_value=SimpleNamespace(stdout=bad, returncode=1)):
+            self.assertEqual(ra.judge_agy(case, {"final": "x"}, "gemini-3.8-flash-high", 5)["status"], "BLOCKED")
+
+    def test_item_validation(self):
+        self.assertIsNone(ra.parse_items('{"items": ["yes"]}', 1))
+        self.assertIsNone(ra.parse_items('{"items": [{"index": 1, "pass": "true"}]}', 1))
+        self.assertIsNone(ra.parse_items('{"items": [{"index": 1, "pass": true}, {"index": 1, "pass": true}]}', 2))
+
+    def test_panel_combination_and_agreement(self):
+        case, run = {"prompt": "p", "rubric": ["a"]}, {"final": "x"}
+        judges = [("omp", "d"), ("agy", "g")]
+
+        def panel(a, b):
+            with mock.patch.object(ra, "judge", return_value={"status": a}), \
+                    mock.patch.object(ra, "judge_agy", return_value={"status": b}):
+                return ra.judge_panel(case, run, judges, 5)
+        self.assertEqual((panel("PASS", "PASS")["status"], panel("PASS", "PASS")["agree"]), ("PASS", True))
+        self.assertEqual((panel("PASS", "FAIL")["status"], panel("PASS", "FAIL")["agree"]), ("FAIL", False))
+        self.assertEqual((panel("PASS", "BLOCKED")["status"], panel("PASS", "BLOCKED")["agree"]), ("BLOCKED", None))
+        self.assertEqual(panel("FAIL", "BLOCKED")["status"], "FAIL")
+
+    def test_parse_judges(self):
+        self.assertEqual(ra.parse_judges(ra.DEFAULT_JUDGES),
+                         [("omp", "workbuddy/deepseek-v4.1-flash"), ("agy", "gemini-3.8-flash-high")])
+        with self.assertRaises(ValueError):
+            ra.parse_judges("gpt:x")
+
+
 class CasesFileTest(unittest.TestCase):
     def test_real_cases_are_valid(self):
         data = ra.load_cases(ra.CASES)
